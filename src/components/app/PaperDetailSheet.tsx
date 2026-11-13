@@ -1,6 +1,10 @@
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
-import { ChevronDown, ExternalLink } from "lucide-react"
+import { Check, ChevronDown, Copy, ExternalLink } from "lucide-react"
+import { toast } from "sonner"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
+import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from "@/components/ui/drawer"
+import { useMediaQuery } from "@/hooks/use-media-query"
+import { useState } from "react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Separator } from "@/components/ui/separator"
@@ -10,13 +14,81 @@ import { PaperRadar } from "./PaperRadar"
 import { ScoreBadge, TrafficLight, signalLabel } from "./TrafficLight"
 import { FlagBadges } from "./FlagBadges"
 
+/**
+ * Paper details: a Radix side sheet on desktop, a Vaul bottom drawer (swipe to dismiss) on small screens.
+ */
 export function PaperDetailSheet({ item, onOpenChange }: { item: ScoredWork | null; onOpenChange: (o: boolean) => void }) {
+  const isDesktop = useMediaQuery("(min-width: 640px)")
+
+  if (!isDesktop) {
+    return (
+      <Drawer open={!!item} onOpenChange={onOpenChange}>
+        <DrawerContent className="max-h-[92vh]">
+          {item && (
+            <div className="overflow-y-auto">
+              <DetailHeader item={item} Title={DrawerTitle} Description={DrawerDescription} Wrapper={DrawerHeader} />
+              <Detail item={item} />
+            </div>
+          )}
+        </DrawerContent>
+      </Drawer>
+    )
+  }
+
   return (
     <Sheet open={!!item} onOpenChange={onOpenChange}>
       <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
-        {item && <Detail item={item} />}
+        {item && (
+          <>
+            <DetailHeader item={item} Title={SheetTitle} Description={SheetDescription} Wrapper={SheetHeader} />
+            <Detail item={item} />
+          </>
+        )}
       </SheetContent>
     </Sheet>
+  )
+}
+
+type Slot = React.ComponentType<{ className?: string; children?: React.ReactNode }>
+
+function DetailHeader({ item, Title, Description, Wrapper }: { item: ScoredWork; Title: Slot; Description: Slot; Wrapper: Slot }) {
+  const w = item.work
+  return (
+    <Wrapper className="pr-10 text-left">
+      <div className="flex items-start gap-3">
+        <TrafficLight signal={item.signal} className="mt-1" />
+        <div className="min-w-0 flex-1">
+          <Title className="text-lg leading-snug">{w.display_name}</Title>
+          <Description className="mt-1">
+            {formatAuthors(w, 5)} ({w.publication_year})
+          </Description>
+          <p className="text-muted-foreground mt-0.5 text-sm italic">{w.primary_location.source?.display_name ?? "Unknown venue"}</p>
+        </div>
+      </div>
+    </Wrapper>
+  )
+}
+
+function CopyButton({ text, label }: { text: string; label: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={() => {
+        navigator.clipboard.writeText(text).then(
+          () => {
+            setCopied(true)
+            toast.success(`${label} copied to clipboard`)
+            setTimeout(() => setCopied(false), 1500)
+          },
+          () => toast.error("Could not access the clipboard")
+        )
+      }}
+    >
+      {copied ? <Check /> : <Copy />}
+      {label}
+    </Button>
   )
 }
 
@@ -25,18 +97,6 @@ function Detail({ item }: { item: ScoredWork }) {
   const timeline = [...w.counts_by_year].sort((a, b) => a.year - b.year)
   return (
     <>
-      <SheetHeader className="pr-10">
-        <div className="flex items-start gap-3">
-          <TrafficLight signal={item.signal} className="mt-1" />
-          <div className="min-w-0 flex-1">
-            <SheetTitle className="text-lg leading-snug">{w.display_name}</SheetTitle>
-            <SheetDescription className="mt-1">
-              {formatAuthors(w, 5)} ({w.publication_year})
-            </SheetDescription>
-            <p className="text-muted-foreground mt-0.5 text-sm italic">{w.primary_location.source?.display_name ?? "Unknown venue"}</p>
-          </div>
-        </div>
-      </SheetHeader>
 
       <div className="flex flex-col gap-5 px-4 pb-8">
         <div className="flex flex-wrap items-center gap-3">
@@ -97,6 +157,7 @@ function Detail({ item }: { item: ScoredWork }) {
         <Separator />
 
         <div className="flex flex-wrap gap-2">
+          <CopyButton text={w._sourcecheck.raw_reference} label="Copy reference" />
           {w.doi && (
             <Button variant="outline" size="sm" asChild>
               <a href={w.doi} target="_blank" rel="noreferrer">DOI <ExternalLink /></a>

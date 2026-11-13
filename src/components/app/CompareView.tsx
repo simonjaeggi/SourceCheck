@@ -1,4 +1,5 @@
 import { GitCompareArrows, X } from "lucide-react"
+import { AnimatePresence, motion } from "motion/react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
@@ -22,15 +23,24 @@ export function CompareView({ items, onRemove, onClear }: { items: ScoredWork[];
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
+        <AnimatePresence mode="popLayout">
         {items.map((it, i) => (
-          <span key={it.work.id} className="bg-card inline-flex items-center gap-2 rounded-full border py-1 pr-1 pl-3 text-sm">
+          <motion.span
+            key={it.work.id}
+            layout
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            className="bg-card inline-flex items-center gap-2 rounded-full border py-1 pr-1 pl-3 text-sm shadow-xs"
+          >
             <span className="size-2.5 rounded-full" style={{ background: SERIES_COLORS[i] }} />
             {shortTitle(it.work.display_name, 30)}
-            <button onClick={() => onRemove(it.work.id)} className="hover:bg-muted rounded-full p-0.5" aria-label="Remove">
+            <button onClick={() => onRemove(it.work.id)} className="hover:bg-muted rounded-full p-0.5" aria-label={`Remove ${it.work.display_name} from comparison`}>
               <X className="size-3.5" />
             </button>
-          </span>
+          </motion.span>
         ))}
+        </AnimatePresence>
         <Button variant="ghost" size="sm" onClick={onClear}>Clear</Button>
       </div>
 

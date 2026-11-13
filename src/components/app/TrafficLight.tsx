@@ -1,3 +1,4 @@
+import NumberFlow from "@number-flow/react"
 import { cn } from "@/lib/utils"
 import type { Signal } from "@/lib/scoring"
 
@@ -25,8 +26,13 @@ export function signalLabel(s: Signal) {
 export function ScoreBadge({ score, signal, size = "md" }: { score: number; signal: Signal; size?: "md" | "lg" }) {
   const ring = signal === "green" ? "ring-signal-green/50" : signal === "amber" ? "ring-signal-amber/60" : "ring-signal-red/50"
   return (
-    <div className={cn("flex items-baseline justify-center rounded-lg bg-card ring-2 tabular-nums", ring, size === "lg" ? "px-3 py-1.5" : "w-16 px-2 py-1")}>
-      <span className={cn("font-semibold", size === "lg" ? "text-2xl" : "text-lg")}>{score.toFixed(1)}</span>
+    <div className={cn("flex items-baseline justify-center rounded-lg bg-card shadow-xs ring-2 tabular-nums", ring, size === "lg" ? "px-3 py-1.5" : "w-16 px-2 py-1")}>
+      <NumberFlow
+        locales="en-US"
+        value={score}
+        format={{ minimumFractionDigits: 1, maximumFractionDigits: 1 }}
+        className={cn("font-semibold", size === "lg" ? "text-2xl" : "text-lg")}
+      />
       <span className="text-muted-foreground ml-0.5 text-xs">/10</span>
     </div>
   )
