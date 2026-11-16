@@ -1,17 +1,19 @@
 import { PolarAngleAxis, PolarGrid, PolarRadiusAxis, Radar, RadarChart, ResponsiveContainer, Tooltip, Legend } from "recharts"
 import { METRICS, SERIES_COLORS, type ScoredWork } from "@/lib/scoring"
 
-export function PaperRadar({ items, height = 280, showLegend = false }: { items: ScoredWork[]; height?: number; showLegend?: boolean }) {
+/** `compact` uses the short criterion names, for small charts where the full labels get clipped. */
+export function PaperRadar({ items, height = 280, showLegend = false, compact = false }: { items: ScoredWork[]; height?: number; showLegend?: boolean; compact?: boolean }) {
   const data = METRICS.map((m) => {
-    const row: Record<string, string | number> = { metric: m.label }
-    items.forEach((it, i) => (row[`s${i}`] = it.metrics[m.key]))
+    const row: Record<string, string | number | null> = { metric: compact ? m.short : m.label }
+    // A missing criterion is drawn at the centre; the tables label it "not measured".
+    items.forEach((it, i) => (row[`s${i}`] = it.metrics[m.key] ?? 0))
     return row
   })
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <RadarChart data={data} outerRadius="72%">
+      <RadarChart data={data} outerRadius={compact ? "62%" : "72%"}>
         <PolarGrid stroke="var(--border)" />
-        <PolarAngleAxis dataKey="metric" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} />
+        <PolarAngleAxis dataKey="metric" tick={{ fontSize: compact ? 10 : 11, fill: "var(--muted-foreground)" }} />
         <PolarRadiusAxis angle={90} domain={[0, 10]} tickCount={6} tick={{ fontSize: 9, fill: "var(--muted-foreground)" }} axisLine={false} />
         {items.map((it, i) => (
           <Radar

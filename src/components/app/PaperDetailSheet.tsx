@@ -5,19 +5,34 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from "@/components/ui/drawer"
 import { useMediaQuery } from "@/hooks/use-media-query"
 import { useState } from "react"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Separator } from "@/components/ui/separator"
 import { Button } from "@/components/ui/button"
 import { METRICS, formatAuthors, type ScoredWork } from "@/lib/scoring"
-import { PaperRadar } from "./PaperRadar"
+import type { AssessState } from "@/lib/assessClient"
 import { ScoreBadge, TrafficLight, signalLabel } from "./TrafficLight"
 import { FlagBadges } from "./FlagBadges"
+import { AiAssessment } from "./AiAssessment"
 
 /**
  * Paper details: a Radix side sheet on desktop, a Vaul bottom drawer (swipe to dismiss) on small screens.
  */
-export function PaperDetailSheet({ item, onOpenChange }: { item: ScoredWork | null; onOpenChange: (o: boolean) => void }) {
+export function PaperDetailSheet({
+  item,
+  context,
+  onOpenChange,
+  assessState,
+  problem,
+  onAssess,
+}: {
+  item: ScoredWork | null
+  context: string
+  onOpenChange: (o: boolean) => void
+  assessState: AssessState | undefined
+  problem: string | null
+  onAssess: (id: string) => void
+}) {
   const isDesktop = useMediaQuery("(min-width: 640px)")
 
   if (!isDesktop) {
@@ -27,7 +42,7 @@ export function PaperDetailSheet({ item, onOpenChange }: { item: ScoredWork | nu
           {item && (
             <div className="overflow-y-auto">
               <DetailHeader item={item} Title={DrawerTitle} Description={DrawerDescription} Wrapper={DrawerHeader} />
-              <Detail item={item} />
+              <Detail key={item.work.id} item={item} context={context} state={assessState} problem={problem} onAssess={() => onAssess(item.work.id)} />
             </div>
           )}
         </DrawerContent>
@@ -41,7 +56,7 @@ export function PaperDetailSheet({ item, onOpenChange }: { item: ScoredWork | nu
         {item && (
           <>
             <DetailHeader item={item} Title={SheetTitle} Description={SheetDescription} Wrapper={SheetHeader} />
-            <Detail item={item} />
+            <Detail key={item.work.id} item={item} context={context} state={assessState} problem={problem} onAssess={() => onAssess(item.work.id)} />
           </>
         )}
       </SheetContent>
@@ -92,7 +107,50 @@ function CopyButton({ text, label }: { text: string; label: string }) {
   )
 }
 
-function Detail({ item }: { item: ScoredWork }) {
+function MatchNote({ item }: { item: ScoredWork }) {
+  const w = item.work
+  const m = w._sourcecheck.match!
+  const authors = w._sourcecheck.author_details ?? []
+  return (
+    <div className="flex flex-col gap-2 text-sm">
+      <p className={m.confidence === "uncertain" ? "rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100" : "text-muted-foreground text-xs"}>
+        {m.method === "doi"
+          ? "Found in OpenAlex by the DOI in your reference."
+          : m.confidence === "likely"
+            ? "Found in OpenAlex by title search; the title matches your reference."
+            : "Found by title search, but the match is uncertain. Check that this is the paper you cite."}
+      </p>
+      {authors.length > 0 && (
+        <p className="text-muted-foreground text-xs">
+          {authors.map((a, i) => (
+            <span key={i}>
+              {i > 0 && "; "}
+              <span className="text-foreground">{a.name}</span>
+              {a.institution && `, ${a.institution}`}
+              {a.h_index != null && ` (h-index ${a.h_index})`}
+            </span>
+          ))}
+        </p>
+      )}
+      {w._sourcecheck.abstract && (
+        <Collapsible>
+          <CollapsibleTrigger asChild>
+            <Button variant="ghost" size="sm" className="text-muted-foreground -ml-2 h-7">
+              Abstract <ChevronDown />
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <p className="bg-muted/60 rounded-md px-3 py-2 text-xs leading-relaxed">{w._sourcecheck.abstract}</p>
+          </CollapsibleContent>
+        </Collapsible>
+      )}
+    </div>
+  )
+}
+
+type AssessProps = { state: AssessState | undefined; problem: string | null; onAssess: () => void }
+
+function Detail({ item, context, state, problem, onAssess }: { item: ScoredWork; context: string } & AssessProps) {
   const w = item.work
   const timeline = [...w.counts_by_year].sort((a, b) => a.year - b.year)
   return (
@@ -100,47 +158,44 @@ function Detail({ item }: { item: ScoredWork }) {
 
       <div className="flex flex-col gap-5 px-4 pb-8">
         <div className="flex flex-wrap items-center gap-3">
-          <ScoreBadge score={item.overall} signal={item.signal} size="lg" />
-          <span className="text-sm font-medium">{signalLabel(item.signal)}</span>
+          {item.overall != null && item.signal && (
+            <>
+              <ScoreBadge score={item.overall} signal={item.signal} size="lg" />
+              <span className="text-sm font-medium">{signalLabel(item.signal)}</span>
+            </>
+          )}
           <FlagBadges flags={item.flags} />
         </div>
 
-        {w._semantic_scholar.tldr && (
+        {w._sourcecheck.match && <MatchNote item={item} />}
+
+        {w._semantic_scholar?.tldr && (
           <p className="bg-muted/60 rounded-md px-3 py-2 text-sm">
             <span className="text-muted-foreground mr-1 text-xs font-semibold uppercase">TL;DR</span>
             {w._semantic_scholar.tldr}
           </p>
         )}
 
-        <section>
-          <h3 className="mb-1 text-sm font-semibold">Quality profile</h3>
-          <PaperRadar items={[item]} height={260} />
-        </section>
+        <AiAssessment item={item} state={state} context={context} problem={problem} onAssess={onAssess} />
 
-        <section>
-          <h3 className="mb-2 text-sm font-semibold">Metrics <span className="text-muted-foreground font-normal">(provisional, pending interviews)</span></h3>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Metric</TableHead>
-                <TableHead className="text-right">Score</TableHead>
-                <TableHead>Underlying signal</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {METRICS.map((m) => (
-                <TableRow key={m.key}>
-                  <TableCell className="font-medium">{m.label}</TableCell>
-                  <TableCell className="text-right tabular-nums">{item.metrics[m.key].toFixed(1)}</TableCell>
-                  <TableCell className="text-muted-foreground whitespace-normal text-xs">
-                    {item.raw[m.key]}
-                    <div className="text-[10px] opacity-70">{m.api}</div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </section>
+        {!item.assessment && (
+          <section>
+            <h3 className="mb-2 text-sm font-semibold">What the AI will get <span className="text-muted-foreground font-normal">(per criterion)</span></h3>
+            <Table>
+              <TableBody>
+                {METRICS.map((m) => (
+                  <TableRow key={m.key}>
+                    <TableCell className="align-top font-medium whitespace-normal">{m.label}</TableCell>
+                    <TableCell className="text-muted-foreground text-xs whitespace-normal">
+                      {item.facts[m.key]}
+                      <div className="text-[10px] opacity-70">{m.fact}</div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </section>
+        )}
 
         <section>
           <h3 className="mb-2 text-sm font-semibold">Citations per year</h3>
@@ -171,7 +226,7 @@ function Detail({ item }: { item: ScoredWork }) {
         <Collapsible>
           <CollapsibleTrigger asChild>
             <Button variant="ghost" size="sm" className="text-muted-foreground -ml-2">
-              Raw API response (mock) <ChevronDown />
+              Raw API response {w._sourcecheck.origin === "openalex" ? "(OpenAlex)" : "(mock)"} <ChevronDown />
             </Button>
           </CollapsibleTrigger>
           <CollapsibleContent>

@@ -1,4 +1,6 @@
-import { ChevronRight, SearchX } from "lucide-react"
+import { AlertTriangle, ChevronRight, Loader2, SearchX, Sparkles } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import type { AssessState } from "@/lib/assessClient"
 import { AnimatePresence, motion } from "motion/react"
 import { Checkbox } from "@/components/ui/checkbox"
 import { cn } from "@/lib/utils"
@@ -12,9 +14,13 @@ interface Props {
   onToggle: (id: string) => void
   onOpen: (item: ScoredWork) => void
   maxCompare: number
+  assess: Record<string, AssessState>
+  onAssess: (id: string) => void
+  /** why assessing is not possible yet (e.g. no thesis context), else null */
+  assessProblem: string | null
 }
 
-export function SourceList({ items, selected, onToggle, onOpen, maxCompare }: Props) {
+export function SourceList({ items, selected, onToggle, onOpen, maxCompare, assess, onAssess, assessProblem }: Props) {
   if (items.length === 0) {
     return (
       <div className="bg-card flex flex-col items-center gap-2 rounded-xl border border-dashed py-12 text-center">
@@ -70,8 +76,9 @@ export function SourceList({ items, selected, onToggle, onOpen, maxCompare }: Pr
                 <div className="font-medium tabular-nums">{w.cited_by_count.toLocaleString("en-US")}</div>
                 <div className="text-muted-foreground">citations</div>
               </div>
-              <TrafficLight signal={it.signal} />
-              <ScoreBadge score={it.overall} signal={it.signal} />
+            </button>
+            <AssessCell item={it} state={assess[w.id]} onAssess={() => onAssess(w.id)} problem={assessProblem} />
+            <button type="button" onClick={() => onOpen(it)} aria-label="Open details" className="focus-visible:ring-ring/50 rounded-md outline-none focus-visible:ring-[3px]">
               <ChevronRight className="text-muted-foreground size-4 shrink-0 transition-transform group-hover:translate-x-0.5" />
             </button>
           </motion.li>
@@ -79,5 +86,33 @@ export function SourceList({ items, selected, onToggle, onOpen, maxCompare }: Pr
       })}
       </AnimatePresence>
     </ul>
+  )
+}
+
+/** Right side of a row: the AI's light and score once assessed, otherwise the trigger. */
+function AssessCell({ item, state, onAssess, problem }: { item: ScoredWork; state: AssessState | undefined; onAssess: () => void; problem: string | null }) {
+  if (state?.status === "done" && item.signal)
+    return (
+      <div className="flex items-center gap-3">
+        <TrafficLight signal={item.signal} />
+        {item.overall != null && <ScoreBadge score={item.overall} signal={item.signal} />}
+      </div>
+    )
+  if (state?.status === "loading")
+    return (
+      <span className="text-muted-foreground flex w-[7.5rem] items-center justify-center gap-1.5 text-xs">
+        <Loader2 className="size-3.5 animate-spin" /> Assessing…
+      </span>
+    )
+  if (state?.status === "error")
+    return (
+      <Button variant="outline" size="sm" className="w-[7.5rem] border-red-300 text-red-700" onClick={onAssess} disabled={!!problem} title={state.message}>
+        <AlertTriangle /> Failed, retry
+      </Button>
+    )
+  return (
+    <Button variant="outline" size="sm" className="w-[7.5rem]" onClick={onAssess} disabled={!!problem} title={problem ?? "Rate this source with AI against your thesis context"}>
+      <Sparkles /> Assess
+    </Button>
   )
 }

@@ -59,7 +59,7 @@ export function CommandMenu(p: Props) {
                     {formatAuthors(r.work, 2)} ({r.work.publication_year})
                   </p>
                 </div>
-                <span className="text-muted-foreground text-xs tabular-nums">{r.overall.toFixed(1)}</span>
+                <span className="text-muted-foreground text-xs tabular-nums">{r.overall?.toFixed(1) ?? "–"}</span>
               </CommandItem>
             ))}
           </CommandGroup>
