@@ -11,8 +11,8 @@
  * Set OPENALEX_API_KEY (free at openalex.org/settings/api). Without it, all
  * requests share an anonymous daily budget per IP, and searches are throttled.
  */
-import type { OpenAlexWork } from "../src/data/types"
-import type { Unmatched } from "../src/lib/lookup"
+import type { OpenAlexWork } from "../src/data/types.js"
+import type { Unmatched } from "../src/lib/lookup.js"
 
 const BASE = "https://api.openalex.org"
 const TIMEOUT_MS = 15_000

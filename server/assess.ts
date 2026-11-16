@@ -17,9 +17,9 @@ import {
   type AssessResult,
   type AssessmentRequest,
   type AssessmentResponse,
-} from "../src/lib/assessment"
-import { PROMPT_VERSION, SYSTEM_PROMPT, buildRepairMessage, buildUserMessage } from "./prompt"
-import { checkRateLimit } from "./rateLimit"
+} from "../src/lib/assessment.js"
+import { PROMPT_VERSION, SYSTEM_PROMPT, buildRepairMessage, buildUserMessage } from "./prompt.js"
+import { checkRateLimit } from "./rateLimit.js"
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 /**

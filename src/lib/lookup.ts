@@ -3,7 +3,7 @@
  * Shared by the browser and the server function. Strict, like the assessment DTOs.
  */
 import { z } from "zod"
-import type { OpenAlexWork } from "../data/types"
+import type { OpenAlexWork } from "../data/types.js"
 
 export const LOOKUP_LIMITS = {
   /** whole request body in bytes, checked before JSON parsing */

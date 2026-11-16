@@ -3,10 +3,10 @@
  * Flow: origin check → body size cap → strict input validation → rate limit → OpenAlex.
  * No AI and no model cost; the limits protect the shared OpenAlex budget.
  */
-import { LOOKUP_ERROR_MESSAGES, LOOKUP_LIMITS, LookupRequestSchema, type LookupErrorCode, type LookupResult } from "../src/lib/lookup"
-import { clientIp, formatIssues, sameOrigin } from "./assess"
-import { lookupReferences, openAlexFetch, type Fetcher } from "./openalex"
-import { checkRateLimit } from "./rateLimit"
+import { LOOKUP_ERROR_MESSAGES, LOOKUP_LIMITS, LookupRequestSchema, type LookupErrorCode, type LookupResult } from "../src/lib/lookup.js"
+import { clientIp, formatIssues, sameOrigin } from "./assess.js"
+import { lookupReferences, openAlexFetch, type Fetcher } from "./openalex.js"
+import { checkRateLimit } from "./rateLimit.js"
 
 const STATUS: Record<LookupErrorCode, number> = {
   invalid_request: 400,

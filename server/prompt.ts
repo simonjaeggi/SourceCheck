@@ -3,7 +3,7 @@
  * Written from the rubric and the expert form v2 only. Per the gold-standard protocol,
  * do not tune it on the gold-standard cases before the first comparison.
  */
-import type { AssessmentRequest } from "../src/lib/assessment"
+import type { AssessmentRequest } from "../src/lib/assessment.js"
 
 export const PROMPT_VERSION = "v2.1"
 
