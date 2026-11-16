@@ -15,17 +15,23 @@
  * Entries 10 and 11 are fictional on purpose to show amber/red cases.
  */
 
-export type SourceType = "journal" | "conference" | "repository" | "book series" | "ebook platform"
+/** OpenAlex source types; live data can contain others (e.g. "metadata", "other"). */
+export type SourceType = "journal" | "conference" | "repository" | "book series" | "ebook platform" | (string & {})
 
 export interface OpenAlexWork {
   id: string
   doi: string | null
   display_name: string
   publication_year: number
-  type: "article" | "preprint" | "book-chapter" | "review"
-  authorships: { author_position: "first" | "middle" | "last"; author: { display_name: string } }[]
+  /** OpenAlex work type; live data also has e.g. "conference-paper", "dataset", "book" */
+  type: "article" | "preprint" | "book-chapter" | "review" | (string & {})
+  authorships: {
+    author_position: "first" | "middle" | "last" | (string & {})
+    author: { id?: string | null; display_name: string }
+    institutions?: { display_name: string }[]
+  }[]
   primary_location: {
-    version: "publishedVersion" | "submittedVersion" | "acceptedVersion"
+    version: "publishedVersion" | "submittedVersion" | "acceptedVersion" | null
     source: {
       display_name: string
       type: SourceType
@@ -44,7 +50,8 @@ export interface OpenAlexWork {
   open_access: { is_oa: boolean; oa_status: "gold" | "green" | "hybrid" | "bronze" | "diamond" | "closed" }
   indexed_in: string[]
   topics: { display_name: string; score: number }[]
-  _semantic_scholar: {
+  /** mock only; live lookups do not query Semantic Scholar yet */
+  _semantic_scholar?: {
     paperId: string
     citationCount: number
     influentialCitationCount: number
@@ -53,12 +60,20 @@ export interface OpenAlexWork {
     tldr: string | null
   }
   _sourcecheck: {
-    /** cosine similarity between the reference's abstract and the user's context (0..1) */
-    relevance_to_context: number
+    /** highest h-index among the authors (OpenAlex `/authors/{id}` summary_stats.h_index) */
+    max_author_h_index: number | null
     /** the raw reference string as parsed from the user's paste */
     raw_reference: string
     /** concepts matched against the user's context, used for the Webster & Watson matrix */
     concepts: string[]
+    /** where this record came from; mock entries leave it out */
+    origin?: "openalex"
+    /** how the reference was matched to the OpenAlex record */
+    match?: { method: "doi" | "title_search"; confidence: "exact" | "likely" | "uncertain" }
+    /** abstract rebuilt from OpenAlex abstract_inverted_index, shortened */
+    abstract?: string | null
+    /** per author: last known institution and h-index (OpenAlex /authors) */
+    author_details?: { name: string; institution: string | null; h_index: number | null }[]
   }
 }
 
@@ -108,7 +123,7 @@ export const mockWorks: OpenAlexWork[] = [
     indexed_in: ["arxiv", "crossref"],
     topics: [{ display_name: "Natural Language Processing Techniques", score: 0.99 }, { display_name: "Topic Modeling", score: 0.97 }],
     _semantic_scholar: { paperId: "90abbc2cf38462b954ae1b772fac9532e2ccd8b0", citationCount: 39870, influentialCitationCount: 4610, publicationTypes: ["Conference"], venue: "Neural Information Processing Systems", tldr: "Scaling up language models greatly improves task-agnostic, few-shot performance." },
-    _sourcecheck: { relevance_to_context: 0.82, raw_reference: "Brown, T. B., et al. (2020). Language models are few-shot learners. Advances in Neural Information Processing Systems, 33.", concepts: ["Prompting techniques"] },
+    _sourcecheck: { max_author_h_index: 62, raw_reference: "Brown, T. B., et al. (2020). Language models are few-shot learners. Advances in Neural Information Processing Systems, 33.", concepts: ["Prompting techniques"] },
   },
   {
     id: "https://openalex.org/W4226278401",
@@ -131,7 +146,7 @@ export const mockWorks: OpenAlexWork[] = [
     indexed_in: ["arxiv", "crossref"],
     topics: [{ display_name: "Natural Language Processing Techniques", score: 0.98 }, { display_name: "Reinforcement Learning in Robotics", score: 0.71 }],
     _semantic_scholar: { paperId: "d766bffc357127e0dc86dd69561d5aeb520d6f4c", citationCount: 14980, influentialCitationCount: 1720, publicationTypes: ["Conference"], venue: "Neural Information Processing Systems", tldr: "Fine-tuning with human feedback aligns language models with user intent." },
-    _sourcecheck: { relevance_to_context: 0.64, raw_reference: "Ouyang, L., et al. (2022). Training language models to follow instructions with human feedback. Advances in Neural Information Processing Systems, 35.", concepts: ["Instruction tuning / RLHF", "Evaluation of LLM output"] },
+    _sourcecheck: { max_author_h_index: 45, raw_reference: "Ouyang, L., et al. (2022). Training language models to follow instructions with human feedback. Advances in Neural Information Processing Systems, 35.", concepts: ["Instruction tuning / RLHF", "Evaluation of LLM output"] },
   },
   {
     id: "https://openalex.org/W4377130745",
@@ -154,7 +169,7 @@ export const mockWorks: OpenAlexWork[] = [
     indexed_in: ["crossref"],
     topics: [{ display_name: "Human-Computer Interaction", score: 0.96 }, { display_name: "Natural Language Processing Techniques", score: 0.88 }],
     _semantic_scholar: { paperId: "4c2e4bfa4e2b8c1d3f1e4c6f1b2d9a0e7f5a3c11", citationCount: 715, influentialCitationCount: 48, publicationTypes: ["Book", "JournalArticle", "Conference"], venue: "International Conference on Human Factors in Computing Systems", tldr: "Non-experts prompt opportunistically and struggle to generalize from failures." },
-    _sourcecheck: { relevance_to_context: 0.91, raw_reference: "Zamfirescu-Pereira, J. D., et al. (2023). Why Johnny can't prompt: How non-AI experts try (and fail) to design LLM prompts. Proceedings of the 2023 CHI Conference on Human Factors in Computing Systems.", concepts: ["Prompting techniques", "Human-centered design", "Evaluation of LLM output"] },
+    _sourcecheck: { max_author_h_index: 38, raw_reference: "Zamfirescu-Pereira, J. D., et al. (2023). Why Johnny can't prompt: How non-AI experts try (and fail) to design LLM prompts. Proceedings of the 2023 CHI Conference on Human Factors in Computing Systems.", concepts: ["Prompting techniques", "Human-centered design", "Evaluation of LLM output"] },
   },
   {
     id: "https://openalex.org/W4320000123",
@@ -177,7 +192,7 @@ export const mockWorks: OpenAlexWork[] = [
     indexed_in: ["arxiv"],
     topics: [{ display_name: "Natural Language Processing Techniques", score: 0.95 }, { display_name: "Software Engineering Research", score: 0.74 }],
     _semantic_scholar: { paperId: "08b85bce712168998004ee80ce4e475390413c74", citationCount: 1312, influentialCitationCount: 76, publicationTypes: ["JournalArticle"], venue: "arXiv.org", tldr: "A catalog of reusable prompt patterns, analogous to software design patterns." },
-    _sourcecheck: { relevance_to_context: 0.93, raw_reference: "White, J., et al. (2023). A prompt pattern catalog to enhance prompt engineering with ChatGPT. arXiv.", concepts: ["Prompting techniques"] },
+    _sourcecheck: { max_author_h_index: 48, raw_reference: "White, J., et al. (2023). A prompt pattern catalog to enhance prompt engineering with ChatGPT. arXiv.", concepts: ["Prompting techniques"] },
   },
   {
     id: "https://openalex.org/W4319000456",
@@ -200,7 +215,7 @@ export const mockWorks: OpenAlexWork[] = [
     indexed_in: ["arxiv", "crossref"],
     topics: [{ display_name: "Natural Language Processing Techniques", score: 0.97 }],
     _semantic_scholar: { paperId: "3aaf6a2cbad5850ad81ab5c163599cb3d523436f", citationCount: 1544, influentialCitationCount: 162, publicationTypes: ["Conference"], venue: "Neural Information Processing Systems", tldr: "An LLM can improve its own output by generating feedback and refining." },
-    _sourcecheck: { relevance_to_context: 0.72, raw_reference: "Madaan, A., et al. (2023). Self-refine: Iterative refinement with self-feedback. Advances in Neural Information Processing Systems, 36.", concepts: ["Prompting techniques", "Evaluation of LLM output"] },
+    _sourcecheck: { max_author_h_index: 72, raw_reference: "Madaan, A., et al. (2023). Self-refine: Iterative refinement with self-feedback. Advances in Neural Information Processing Systems, 36.", concepts: ["Prompting techniques", "Evaluation of LLM output"] },
   },
   {
     id: "https://openalex.org/W4318000789",
@@ -223,7 +238,7 @@ export const mockWorks: OpenAlexWork[] = [
     indexed_in: ["arxiv"],
     topics: [{ display_name: "Natural Language Processing Techniques", score: 0.96 }, { display_name: "Multi-Agent Systems", score: 0.69 }],
     _semantic_scholar: { paperId: "99832586d55f540f603637e458a292406a0ed75d", citationCount: 3015, influentialCitationCount: 402, publicationTypes: ["Conference"], venue: "International Conference on Learning Representations", tldr: "Interleaving reasoning traces and actions improves LLM task solving." },
-    _sourcecheck: { relevance_to_context: 0.58, raw_reference: "Yao, S., et al. (2023). ReAct: Synergizing reasoning and acting in language models. International Conference on Learning Representations.", concepts: ["Prompting techniques", "Reasoning & agents"] },
+    _sourcecheck: { max_author_h_index: 55, raw_reference: "Yao, S., et al. (2023). ReAct: Synergizing reasoning and acting in language models. International Conference on Learning Representations.", concepts: ["Prompting techniques", "Reasoning & agents"] },
   },
   {
     id: "https://openalex.org/W4396000222",
@@ -246,7 +261,7 @@ export const mockWorks: OpenAlexWork[] = [
     indexed_in: ["arxiv"],
     topics: [{ display_name: "Natural Language Processing Techniques", score: 0.99 }],
     _semantic_scholar: { paperId: "a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5", citationCount: 398, influentialCitationCount: 31, publicationTypes: ["JournalArticle", "Review"], venue: "arXiv.org", tldr: "A taxonomy of 58 text-based prompting techniques and a shared vocabulary." },
-    _sourcecheck: { relevance_to_context: 0.95, raw_reference: "Schulhoff, S., et al. (2024). The prompt report: A systematic survey of prompt engineering techniques. arXiv.", concepts: ["Prompting techniques", "Evaluation of LLM output"] },
+    _sourcecheck: { max_author_h_index: 34, raw_reference: "Schulhoff, S., et al. (2024). The prompt report: A systematic survey of prompt engineering techniques. arXiv.", concepts: ["Prompting techniques", "Evaluation of LLM output"] },
   },
   {
     id: "https://openalex.org/W4395000333",
@@ -269,7 +284,7 @@ export const mockWorks: OpenAlexWork[] = [
     indexed_in: ["crossref", "scopus"],
     topics: [{ display_name: "Innovation and Knowledge Management", score: 0.93 }, { display_name: "Artificial Intelligence in Business", score: 0.91 }],
     _semantic_scholar: { paperId: "b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0", citationCount: 109, influentialCitationCount: 6, publicationTypes: ["JournalArticle"], venue: "Business Horizons", tldr: "Prompting as an organizational capability for innovation." },
-    _sourcecheck: { relevance_to_context: 0.77, raw_reference: "Sundberg, L., & Holmström, J. (2024). Innovating by prompting: How to facilitate innovation in the age of generative AI. Business Horizons, 67(5), 561–570.", concepts: ["Business innovation", "Prompting techniques"] },
+    _sourcecheck: { max_author_h_index: 29, raw_reference: "Sundberg, L., & Holmström, J. (2024). Innovating by prompting: How to facilitate innovation in the age of generative AI. Business Horizons, 67(5), 561–570.", concepts: ["Business innovation", "Prompting techniques"] },
   },
   {
     id: "https://openalex.org/W4317000444",
@@ -292,7 +307,7 @@ export const mockWorks: OpenAlexWork[] = [
     indexed_in: ["arxiv"],
     topics: [{ display_name: "Natural Language Processing Techniques", score: 0.97 }],
     _semantic_scholar: { paperId: "c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0", citationCount: 871, influentialCitationCount: 61, publicationTypes: ["JournalArticle"], venue: "arXiv.org", tldr: "The HC3 corpus compares ChatGPT and human expert answers." },
-    _sourcecheck: { relevance_to_context: 0.48, raw_reference: "Guo, B., et al. (2023). How close is ChatGPT to human experts? Comparison corpus, evaluation, and detection. arXiv.", concepts: ["Evaluation of LLM output"] },
+    _sourcecheck: { max_author_h_index: 24, raw_reference: "Guo, B., et al. (2023). How close is ChatGPT to human experts? Comparison corpus, evaluation, and detection. arXiv.", concepts: ["Evaluation of LLM output"] },
   },
   {
     id: "https://openalex.org/W9000000010",
@@ -315,7 +330,7 @@ export const mockWorks: OpenAlexWork[] = [
     indexed_in: ["crossref"],
     topics: [{ display_name: "Educational Technology", score: 0.62 }],
     _semantic_scholar: { paperId: "f0e1d2c3b4a5968778695a4b3c2d1e0f9a8b7c6d", citationCount: 1, influentialCitationCount: 0, publicationTypes: ["JournalArticle"], venue: "", tldr: null },
-    _sourcecheck: { relevance_to_context: 0.55, raw_reference: "Example, A., & Placeholder, B. (2025). Ten prompt secrets that boost student productivity by 500%. International Journal of Advanced AI Research and Trends, 4(2), 1–9.", concepts: ["Prompting techniques", "Business innovation"] },
+    _sourcecheck: { max_author_h_index: 2, raw_reference: "Example, A., & Placeholder, B. (2025). Ten prompt secrets that boost student productivity by 500%. International Journal of Advanced AI Research and Trends, 4(2), 1–9.", concepts: ["Prompting techniques", "Business innovation"] },
   },
   {
     id: "https://openalex.org/W9000000011",
@@ -338,7 +353,7 @@ export const mockWorks: OpenAlexWork[] = [
     indexed_in: ["crossref", "doaj"],
     topics: [{ display_name: "Scientific Integrity", score: 0.81 }],
     _semantic_scholar: { paperId: "e9d8c7b6a5f4e3d2c1b0a9f8e7d6c5b4a3f2e1d0", citationCount: 54, influentialCitationCount: 3, publicationTypes: ["JournalArticle"], venue: "Journal of Computational Information Studies", tldr: null },
-    _sourcecheck: { relevance_to_context: 0.86, raw_reference: "Mockauthor, C., Fictional, D., & Sample, E. (2023). Large language models reliably detect fabricated citations. Journal of Computational Information Studies, 12(3), 201–219.", concepts: ["Evaluation of LLM output", "Human-centered design"] },
+    _sourcecheck: { max_author_h_index: 7, raw_reference: "Mockauthor, C., Fictional, D., & Sample, E. (2023). Large language models reliably detect fabricated citations. Journal of Computational Information Studies, 12(3), 201–219.", concepts: ["Evaluation of LLM output", "Human-centered design"] },
   },
 ]
 

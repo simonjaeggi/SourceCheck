@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react"
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { BookCheck, FileText, Loader2, ScanSearch, Sparkles, ListChecks, GitCompareArrows, SlidersHorizontal, Info, Search, X, ArrowRight } from "lucide-react"
 import { AnimatePresence, MotionConfig, motion } from "motion/react"
 import NumberFlow from "@number-flow/react"
@@ -16,8 +16,10 @@ import { BorderBeam } from "@/components/ui/border-beam"
 import { AnimatedShinyText } from "@/components/ui/animated-shiny-text"
 import { Spotlight } from "@/components/ui/spotlight"
 import { cn } from "@/lib/utils"
-import { mockWorks, SAMPLE_CONTEXT, SAMPLE_REFERENCES } from "@/data/mockWorks"
+import { mockWorks, SAMPLE_CONTEXT, SAMPLE_REFERENCES, type OpenAlexWork } from "@/data/mockWorks"
+import { contextProblem, requestAssessment, type AssessState } from "@/lib/assessClient"
 import { scoreWork, type ScoredWork, type Signal } from "@/lib/scoring"
+import { LOOKUP_ERROR_MESSAGES, LOOKUP_LIMITS, UNMATCHED_LABELS, type LookupResult, type Unmatched } from "@/lib/lookup"
 import { SourceList } from "@/components/app/SourceList"
 import type { AdvancedViews } from "@/components/app/AdvancedView"
 import { TrafficLight } from "@/components/app/TrafficLight"
@@ -39,18 +41,61 @@ export default function App() {
   const [references, setReferences] = useState(SAMPLE_REFERENCES)
   const [context, setContext] = useState(SAMPLE_CONTEXT)
   const [loading, setLoading] = useState(false)
-  const [results, setResults] = useState<ScoredWork[] | null>(() => mockWorks.map((w) => scoreWork(w)))
-  const [open, setOpen] = useState<ScoredWork | null>(null)
+  const [works, setWorks] = useState<OpenAlexWork[] | null>(mockWorks)
+  /** AI assessment per work id; a source without an entry has not been assessed */
+  const [assess, setAssess] = useState<Record<string, AssessState>>({})
+  const [batch, setBatch] = useState<{ done: number; total: number } | null>(null)
+  /** bumped on every new lookup, so late answers for the old list are dropped */
+  const generation = useRef(0)
+  const [unmatched, setUnmatched] = useState<Unmatched[]>([])
+  /** "mock" until the first successful OpenAlex lookup */
+  const [dataSource, setDataSource] = useState<"mock" | "openalex">("mock")
+  const [openId, setOpenId] = useState<string | null>(null)
   const [selected, setSelected] = useState<string[]>([])
   const [tab, setTab] = useState("sources")
   const [sort, setSort] = useState<SortKey>("score")
-  const [filter, setFilter] = useState<Signal | "all">("all")
+  const [filter, setFilter] = useState<Signal | "all" | "pending">("all")
   const [views, setViews] = useState<AdvancedViews>({ webster: true, timeline: false, apiFields: false })
   const [cmdOpen, setCmdOpen] = useState(false)
   // Lazy overlays stay mounted after first use so their close animations still run.
   const [sheetUsed, setSheetUsed] = useState(false)
   const [cmdUsed, setCmdUsed] = useState(false)
-  useEffect(() => { if (open) setSheetUsed(true) }, [open])
+  useEffect(() => { if (openId) setSheetUsed(true) }, [openId])
+
+  const results = useMemo(
+    () => works?.map((w) => { const a = assess[w.id]; return scoreWork(w, a?.status === "done" ? a.assessment : null) }) ?? null,
+    [works, assess]
+  )
+  const open = results?.find((r) => r.work.id === openId) ?? null
+  const assessProblem = contextProblem(context)
+
+  async function runAssess(id: string) {
+    const work = works?.find((w) => w.id === id)
+    if (!work || contextProblem(context) || assess[id]?.status === "loading") return
+    const gen = generation.current
+    setAssess((m) => ({ ...m, [id]: { status: "loading" } }))
+    const result = await requestAssessment(work, context)
+    if (gen === generation.current) setAssess((m) => ({ ...m, [id]: result }))
+    return result
+  }
+
+  /** One after the other: free models are slow, and parallel calls would hit the rate limits. */
+  async function assessAll() {
+    const todo = (works ?? []).filter((w) => !assess[w.id] || assess[w.id].status === "error").map((w) => w.id)
+    if (!todo.length || batch) return
+    const gen = generation.current
+    setBatch({ done: 0, total: todo.length })
+    for (let i = 0; i < todo.length; i++) {
+      if (gen !== generation.current) break
+      const r = await runAssess(todo[i])
+      setBatch({ done: i + 1, total: todo.length })
+      if (r?.status === "error" && (r.code === "rate_limited" || r.code === "not_configured")) {
+        toast.error("Stopped assessing", { description: r.message })
+        break
+      }
+    }
+    setBatch(null)
+  }
   useEffect(() => { if (cmdOpen) setCmdUsed(true) }, [cmdOpen])
 
   // Warm the split chunks once the page is idle, so later interactions feel instant.
@@ -61,23 +106,53 @@ export default function App() {
     else setTimeout(prefetch, 2000)
   }, [])
 
-  const refCount = references.split("\n").filter((l) => l.trim()).length
+  const refLines = references.split("\n").map((l) => l.trim()).filter(Boolean)
+  const refCount = refLines.length
 
-  function analyze() {
-    // Prototype: no parsing or API calls yet. Simulates latency and returns the mock set.
+  async function analyze() {
+    if (refCount > LOOKUP_LIMITS.references) {
+      toast.error(`At most ${LOOKUP_LIMITS.references} references per check`, { description: `You pasted ${refCount}. Split the list and check it in parts.` })
+      return
+    }
+    const tooLong = refLines.findIndex((l) => l.length > LOOKUP_LIMITS.reference)
+    if (tooLong >= 0) {
+      toast.error(`Reference ${tooLong + 1} is longer than ${LOOKUP_LIMITS.reference} characters`, { description: "Put one reference per line." })
+      return
+    }
+    const previous = works
     setLoading(true)
-    setResults(null)
+    setWorks(null)
     setSelected([])
-    setTimeout(() => {
-      const next = mockWorks.map((w) => scoreWork(w))
-      setResults(next)
-      setLoading(false)
-      setTab("sources")
-      const flagged = next.filter((r) => r.signal !== "green").length
-      toast.success(`${next.length} sources checked`, {
-        description: flagged ? `${flagged} need${flagged === 1 ? "s" : ""} a closer look.` : "All sources look trustworthy.",
-      })
-    }, 1100)
+    let body: LookupResult | null = null
+    try {
+      const res = await fetch("/api/lookup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ references: refLines }) })
+      body = await res.json()
+    } catch {
+      body = null
+    }
+    setLoading(false)
+    if (!body?.ok) {
+      setWorks(previous)
+      toast.error("The sources could not be checked", { description: body?.error.message ?? LOOKUP_ERROR_MESSAGES.upstream_error })
+      return
+    }
+    generation.current++
+    setAssess({})
+    setBatch(null)
+    setWorks(body.works)
+    setUnmatched(body.unmatched)
+    setDataSource("openalex")
+    setTab("sources")
+    const throttled = body.unmatched.filter((u) => u.reason === "openalex_rate_limited" || u.reason === "openalex_error").length
+    const missing = body.unmatched.length - throttled
+    const notify = throttled ? toast.warning : toast.success
+    notify(`${body.works.length} of ${refCount} sources found in OpenAlex`, {
+      description: [
+        missing ? `${missing} not found.` : "",
+        throttled ? `${throttled} could not be looked up because OpenAlex limited the requests; try again later.` : "",
+        "Assess them with AI to get ratings.",
+      ].filter(Boolean).join(" "),
+    })
   }
 
   function loadExample() {
@@ -98,8 +173,9 @@ export default function App() {
 
   const sorted = useMemo(() => {
     if (!results) return []
-    const list = filter === "all" ? [...results] : results.filter((r) => r.signal === filter)
-    if (sort === "score") list.sort((a, b) => b.overall - a.overall)
+    const list = filter === "all" ? [...results] : filter === "pending" ? results.filter((r) => !r.signal) : results.filter((r) => r.signal === filter)
+    // Not assessed sources go last when sorting by score.
+    if (sort === "score") list.sort((a, b) => (b.overall ?? -1) - (a.overall ?? -1))
     if (sort === "year") list.sort((a, b) => b.work.publication_year - a.work.publication_year)
     if (sort === "citations") list.sort((a, b) => b.work.cited_by_count - a.work.cited_by_count)
     return list
@@ -111,11 +187,11 @@ export default function App() {
   )
 
   const counts = useMemo(() => {
-    const c = { green: 0, amber: 0, red: 0 }
-    results?.forEach((r) => c[r.signal]++)
+    const c = { green: 0, amber: 0, red: 0, pending: 0 }
+    results?.forEach((r) => c[r.signal ?? "pending"]++)
     return c
   }, [results])
-  const avg = results?.length ? results.reduce((s, r) => s + r.overall, 0) / results.length : 0
+  const assessedCount = results ? results.length - counts.pending : 0
 
   const toggle = (id: string) => {
     if (!selected.includes(id) && selected.length >= MAX_COMPARE) {
@@ -174,9 +250,15 @@ export default function App() {
               <span className="hidden flex-1 truncate text-left whitespace-nowrap md:inline">Search sources & actions…</span>
               <Kbd className="hidden sm:inline-flex">⌘K</Kbd>
             </button>
-            <Badge variant="outline" className="hidden border-amber-300 bg-amber-50 text-amber-800 sm:inline-flex">
-              Prototype with mock data
-            </Badge>
+            {dataSource === "mock" ? (
+              <Badge variant="outline" className="hidden border-amber-300 bg-amber-50 text-amber-800 sm:inline-flex">
+                Prototype with mock data
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="hidden border-emerald-300 bg-emerald-50 text-emerald-800 sm:inline-flex">
+                Live OpenAlex data
+              </Badge>
+            )}
           </div>
         </header>
 
@@ -232,7 +314,7 @@ export default function App() {
             </Card>
             <p className="text-muted-foreground flex gap-2 px-1 text-xs leading-relaxed">
               <Info className="mt-0.5 size-3.5 shrink-0" />
-              Planned data sources: OpenAlex (citations, FWCI, retractions, venue), Semantic Scholar (influential citations, TL;DR), Crossref (publisher metadata). Scores are provisional.
+              "Analyze sources" looks each reference up in OpenAlex (citations, retractions, venue, author h-index). Ratings come only from the AI assessment, which judges every source against the context above.
             </p>
           </aside>
 
@@ -266,9 +348,9 @@ export default function App() {
                   <TabsContent value="sources" className="flex flex-col gap-4">
                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                       {[
-                        { label: "Sources checked", value: results.length },
-                        { label: "Average score", value: avg, suffix: "/10", decimals: 1 },
-                        { label: "Trustworthy", value: counts.green, signal: "green" as Signal },
+                        { label: "Sources found", value: results.length },
+                        { label: "Assessed by AI", value: assessedCount, suffix: `/${results.length}` },
+                        { label: "Suitable", value: counts.green, signal: "green" as Signal },
                         { label: "Need attention", value: counts.amber + counts.red, signal: (counts.red ? "red" : "amber") as Signal },
                       ].map((st, i) => (
                         <motion.div
@@ -282,12 +364,34 @@ export default function App() {
                       ))}
                     </div>
 
+                    {results.length > 0 && (
+                      <div className="bg-card flex flex-wrap items-center gap-3 rounded-xl border px-4 py-3 text-sm shadow-xs">
+                        <Sparkles className="text-muted-foreground size-4" />
+                        <div className="min-w-0 flex-1">
+                          {counts.pending === 0 ? (
+                            <p>All sources are assessed.</p>
+                          ) : (
+                            <p>
+                              {counts.pending} source{counts.pending === 1 ? "" : "s"} not assessed yet. Ratings appear once the AI has judged them against your thesis context.
+                            </p>
+                          )}
+                          {assessProblem && <p className="text-muted-foreground text-xs">{assessProblem}</p>}
+                        </div>
+                        {counts.pending > 0 && (
+                          <Button onClick={assessAll} disabled={!!batch || !!assessProblem}>
+                            {batch ? <Loader2 className="animate-spin" /> : <Sparkles />}
+                            {batch ? `Assessing ${Math.min(batch.done + 1, batch.total)} of ${batch.total}…` : `Assess all (${counts.pending})`}
+                          </Button>
+                        )}
+                      </div>
+                    )}
+
                     <div className="flex flex-wrap items-center gap-2 text-sm">
                       <span className="text-muted-foreground">Show</span>
-                      {(["all", "green", "amber", "red"] as const).map((f) => (
+                      {(["all", "green", "amber", "red", "pending"] as const).map((f) => (
                         <Chip key={f} group="filter" active={filter === f} onClick={() => setFilter(f)}>
-                          {f !== "all" && <span className={cn("size-2 rounded-full", f === "green" ? "bg-signal-green" : f === "amber" ? "bg-signal-amber" : "bg-signal-red")} />}
-                          {f === "all" ? `All (${results.length})` : `${counts[f]}`}
+                          {f !== "all" && f !== "pending" && <span className={cn("size-2 rounded-full", f === "green" ? "bg-signal-green" : f === "amber" ? "bg-signal-amber" : "bg-signal-red")} />}
+                          {f === "all" ? `All (${results.length})` : f === "pending" ? `Not assessed (${counts.pending})` : `${counts[f]}`}
                         </Chip>
                       ))}
                       <span className="text-muted-foreground ml-auto">Sort by</span>
@@ -298,7 +402,17 @@ export default function App() {
                       ))}
                     </div>
 
-                    <SourceList items={sorted} selected={selected} onToggle={toggle} onOpen={setOpen} maxCompare={MAX_COMPARE} />
+                    <SourceList
+                      items={sorted}
+                      selected={selected}
+                      onToggle={toggle}
+                      onOpen={(it) => setOpenId(it.work.id)}
+                      maxCompare={MAX_COMPARE}
+                      assess={assess}
+                      onAssess={runAssess}
+                      assessProblem={assessProblem}
+                    />
+                    {unmatched.length > 0 && <UnmatchedList items={unmatched} />}
                     <p className="text-muted-foreground text-xs">Click a source for details. Tick boxes to compare up to {MAX_COMPARE}.</p>
 
                     {/* Floating compare bar */}
@@ -343,7 +457,16 @@ export default function App() {
         </main>
 
         <Suspense fallback={null}>
-          {sheetUsed && <PaperDetailSheet item={open} onOpenChange={(o) => !o && setOpen(null)} />}
+          {sheetUsed && (
+            <PaperDetailSheet
+              item={open}
+              context={context}
+              onOpenChange={(o) => !o && setOpenId(null)}
+              assessState={openId ? assess[openId] : undefined}
+              problem={assessProblem}
+              onAssess={runAssess}
+            />
+          )}
           {cmdUsed && (
         <CommandMenu
           open={cmdOpen}
@@ -351,7 +474,7 @@ export default function App() {
           results={results}
           loading={loading}
           canAnalyze={!!refCount}
-          onOpenSource={setOpen}
+          onOpenSource={(r) => setOpenId(r.work.id)}
           onAnalyze={analyze}
           onLoadExample={loadExample}
           onClear={clearInput}
@@ -410,12 +533,29 @@ function Chip({ active, onClick, children, group }: { active: boolean; onClick: 
   )
 }
 
+function UnmatchedList({ items }: { items: Unmatched[] }) {
+  return (
+    <Card className="gap-2 border-dashed px-4 py-3 shadow-none">
+      <p className="text-sm font-medium">Not matched ({items.length})</p>
+      <p className="text-muted-foreground text-xs">These references could not be matched to an OpenAlex record. Check them by hand; a source that no index knows is a warning sign in itself.</p>
+      <ul className="flex flex-col gap-2 text-xs">
+        {items.map((u, i) => (
+          <li key={i} className="flex flex-col gap-0.5">
+            <span className="font-mono">{u.reference}</span>
+            <span className="text-muted-foreground">{UNMATCHED_LABELS[u.reason]}</span>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  )
+}
+
 function LoadingState({ n }: { n: number }) {
   return (
     <div className="flex flex-col gap-2">
       <p className="flex items-center gap-2 text-sm">
         <Loader2 className="text-muted-foreground size-4 animate-spin" />
-        <AnimatedShinyText className="mx-0 max-w-none">Parsing {n} references, querying OpenAlex and Semantic Scholar…</AnimatedShinyText>
+        <AnimatedShinyText className="mx-0 max-w-none">Looking up {n} references in OpenAlex…</AnimatedShinyText>
       </p>
       {Array.from({ length: 5 }).map((_, i) => (
         <div key={i} className="bg-card flex h-20 animate-pulse items-center gap-3 rounded-xl border px-4" style={{ animationDelay: `${i * 120}ms` }}>

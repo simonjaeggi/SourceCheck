@@ -138,7 +138,7 @@ function ApiFields({ items }: { items: ScoredWork[] }) {
     <Card className="py-4">
       <CardHeader className="px-4">
         <CardTitle>Raw indicators</CardTitle>
-        <CardDescription>Fields as returned by OpenAlex and Semantic Scholar (mock).</CardDescription>
+        <CardDescription>Fields as returned by OpenAlex and Semantic Scholar (Semantic Scholar is mock only).</CardDescription>
       </CardHeader>
       <CardContent className="px-4">
         <Table>
@@ -165,7 +165,7 @@ function ApiFields({ items }: { items: ScoredWork[] }) {
                   <TableCell>{w.primary_location.source?.type ?? "null"}</TableCell>
                   <TableCell className="text-right tabular-nums">{w.cited_by_count}</TableCell>
                   <TableCell className="text-right tabular-nums">{w.fwci ?? "null"}</TableCell>
-                  <TableCell className="text-right tabular-nums">{w._semantic_scholar.influentialCitationCount}</TableCell>
+                  <TableCell className="text-right tabular-nums">{w._semantic_scholar?.influentialCitationCount ?? "–"}</TableCell>
                   <TableCell>{String(w.primary_location.source?.is_core ?? false)}</TableCell>
                   <TableCell className={w.is_retracted ? "text-signal-red font-semibold" : ""}>{String(w.is_retracted)}</TableCell>
                   <TableCell>{w.open_access.oa_status}</TableCell>

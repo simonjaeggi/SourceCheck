@@ -1,83 +1,93 @@
 import type { OpenAlexWork } from "@/data/mockWorks"
+import { RATING_SCORE, type AssessmentResponse, type Verdict } from "@/lib/assessment"
 
 /**
- * PROVISIONAL METRICS
- * These six dimensions are placeholders until the interview results are in.
- * Each maps raw API fields to a 0..10 score so they fit one spider chart.
+ * METRICS — the eight criteria of the source-quality rubric (expert form v2).
+ * Every rating comes from the AI assessment; there are no heuristic scores. `fact`
+ * names what OpenAlex contributes as input for the AI on that criterion.
  */
 export const METRICS = [
-  { key: "impact", label: "Citation impact", api: "OpenAlex: citation_normalized_percentile", hint: "Field-normalised citation percentile" },
-  { key: "influence", label: "Influence", api: "Semantic Scholar: influentialCitationCount", hint: "Share of citations that build substantially on the work" },
-  { key: "venue", label: "Venue & peer review", api: "OpenAlex: primary_location.source (type, is_core) + type", hint: "Peer-reviewed venue vs. preprint or unknown outlet" },
-  { key: "recency", label: "Recency", api: "OpenAlex: publication_year", hint: "How current the work is" },
-  { key: "relevance", label: "Relevance to context", api: "SourceCheck: embedding similarity to your abstract", hint: "Match between the paper and your context" },
-  { key: "integrity", label: "Integrity", api: "OpenAlex: is_retracted (Retraction Watch), DOI present", hint: "No retraction, resolvable identifier" },
+  { key: "relevance", label: "Relevance to the use", short: "Relevance", fact: "your thesis context and the abstract", hint: "Does the source contribute to answering the research question?" },
+  { key: "currency", label: "Currency", short: "Currency", fact: "OpenAlex: publication_year (the AI weighs it against the pace of the field)", hint: "Current enough for this topic, or a foundational work whose age does not matter" },
+  { key: "authority", label: "Authority", short: "Authority", fact: "OpenAlex: authors' institutions and h-index", hint: "Do the authors or the issuing institution have recognised expertise?" },
+  { key: "venue", label: "Venue & peer review", short: "Venue", fact: "OpenAlex: primary_location.source, type, version", hint: "How reputable is the venue, and was the source peer-reviewed?" },
+  { key: "evidence", label: "Evidence & method", short: "Evidence", fact: "OpenAlex: abstract, referenced_works_count, is_retracted", hint: "Are claims supported by data, method or literature, and coherently argued?" },
+  { key: "objectivity", label: "Purpose & objectivity", short: "Objectivity", fact: "OpenAlex: abstract and venue", hint: "Does the source inform objectively, or pursue commercial, political or other interests?" },
+  { key: "reception", label: "Reception in the field", short: "Reception", fact: "OpenAlex: cited_by_count, citation_normalized_percentile", hint: "How widely is the source taken up, relative to its age and discipline?" },
+  { key: "retrievability", label: "Referencing & retrievability", short: "Retrievability", fact: "your reference and the OpenAlex DOI", hint: "Is the source cited correctly and can it be located unambiguously?" },
 ] as const
 
 export type MetricKey = (typeof METRICS)[number]["key"]
 export type Signal = "green" | "amber" | "red"
 
+export const VERDICT_SIGNAL: Record<Verdict, Signal> = { suitable: "green", usable_with_reservations: "amber", not_usable: "red" }
+
 export interface ScoredWork {
   work: OpenAlexWork
-  metrics: Record<MetricKey, number>
-  raw: Record<MetricKey, string>
-  overall: number
-  signal: Signal
+  /** null until the AI assessment has run for this source */
+  assessment: AssessmentResponse | null
+  /** 0..10 per criterion from the AI rating; null when not assessed or rated "no rating" */
+  metrics: Record<MetricKey, number | null>
+  /** mean of the rated criteria (equal weights), 0..10; null until assessed */
+  overall: number | null
+  /** from the AI's overall verdict; null until assessed */
+  signal: Signal | null
+  /** what OpenAlex says per criterion, shown next to the AI's rating */
+  facts: Record<MetricKey, string>
   peerReviewed: boolean | null
   flags: { label: string; tone: "good" | "warn" | "bad" | "neutral" }[]
 }
 
-const clamp = (n: number) => Math.max(0, Math.min(10, n))
 const r1 = (n: number) => Math.round(n * 10) / 10
 
-const WEIGHTS: Record<MetricKey, number> = { impact: 0.2, influence: 0.1, venue: 0.25, recency: 0.1, relevance: 0.2, integrity: 0.15 }
-
-export function scoreWork(work: OpenAlexWork, currentYear = 2026): ScoredWork {
+/** Peer review as far as the metadata shows it (a fact for the AI and a badge, not a score). */
+export function peerReviewStatus(work: OpenAlexWork): boolean | null {
   const src = work.primary_location.source
-  const s2 = work._semantic_scholar
-  const pct = work.citation_normalized_percentile?.value ?? 0
+  if (work.type === "preprint" || work.primary_location.version === "submittedVersion" || src?.type === "repository") return false
+  if (src && (src.type === "journal" || src.type === "conference")) return src.is_core || !!src.host_organization_name ? true : null
+  return null
+}
 
-  const peerReviewed =
-    work.type === "preprint" || src?.type === "repository" ? false : src && (src.type === "journal" || src.type === "conference") ? (src.is_core || !!src.host_organization_name ? true : null) : null
-
-  const infRatio = s2.citationCount > 0 ? s2.influentialCitationCount / s2.citationCount : 0
+export function scoreWork(work: OpenAlexWork, assessment: AssessmentResponse | null = null, currentYear = new Date().getFullYear()): ScoredWork {
+  const src = work.primary_location.source
+  const pct = work.citation_normalized_percentile?.value
+  const peerReviewed = peerReviewStatus(work)
   const age = currentYear - work.publication_year
+  const h = work._sourcecheck.max_author_h_index
+  const refs = work.referenced_works_count
 
-  const metrics: Record<MetricKey, number> = {
-    impact: clamp(pct * 10),
-    influence: clamp((infRatio / 0.12) * 10),
-    venue: clamp(peerReviewed === true ? (src?.is_core ? 9.5 : 7.5) : peerReviewed === false ? 3.5 : 1.5),
-    recency: clamp(10 - age * 1.2),
-    relevance: clamp(work._sourcecheck.relevance_to_context * 10),
-    integrity: work.is_retracted ? 0 : work.doi ? 10 : 7,
+  const metrics = Object.fromEntries(
+    METRICS.map((m) => {
+      const r = assessment?.criteria[m.key].rating
+      return [m.key, r && r !== "no_rating" ? RATING_SCORE[r] : null]
+    })
+  ) as Record<MetricKey, number | null>
+  const rated = Object.values(metrics).filter((v): v is number => v != null)
+  const overall = assessment && rated.length ? r1(rated.reduce((s, v) => s + v, 0) / rated.length) : null
+  const signal = assessment ? VERDICT_SIGNAL[assessment.overall] : null
+
+  const facts: Record<MetricKey, string> = {
+    relevance: work._sourcecheck.abstract ? "abstract available" : "no abstract; title only",
+    currency: `${work.publication_year} (${age} year${age === 1 ? "" : "s"} old)`,
+    authority: h == null ? "no author h-index found" : `highest author h-index ${h}`,
+    venue: `${src?.display_name ?? "no venue"}${src ? ` (${src.type}${src.is_core ? ", CWTS core" : ""})` : ""}${peerReviewed === false ? ", not peer reviewed" : ""}`,
+    evidence: work.is_retracted ? "RETRACTED" : `${refs.toLocaleString("en-US")} references`,
+    objectivity: src?.host_organization_name ? `published by ${src.host_organization_name}` : "publisher unknown",
+    reception: `${work.cited_by_count.toLocaleString("en-US")} citations${pct != null ? `, ${(pct * 100).toFixed(1)}th percentile for age & field` : ""}`,
+    retrievability: work.doi ? "DOI resolves" : src ? "no DOI, venue identifiable" : "no DOI, venue unknown",
   }
-  Object.keys(metrics).forEach((k) => (metrics[k as MetricKey] = r1(metrics[k as MetricKey])))
-
-  const raw: Record<MetricKey, string> = {
-    impact: `${(pct * 100).toFixed(1)}th percentile, ${work.cited_by_count.toLocaleString("en-US")} citations`,
-    influence: `${s2.influentialCitationCount.toLocaleString("en-US")} of ${s2.citationCount.toLocaleString("en-US")} citations influential (${(infRatio * 100).toFixed(1)}%)`,
-    venue: `${src?.type ?? "unknown"}${src?.is_core ? ", CWTS core source" : ""}${peerReviewed === false ? ", not peer reviewed" : ""}`,
-    recency: `${work.publication_year} (${age} year${age === 1 ? "" : "s"} old)`,
-    relevance: `similarity ${work._sourcecheck.relevance_to_context.toFixed(2)}`,
-    integrity: work.is_retracted ? "RETRACTED (Retraction Watch)" : work.doi ? "not retracted, DOI resolves" : "not retracted, no DOI",
-  }
-
-  let overall = (Object.keys(WEIGHTS) as MetricKey[]).reduce((s, k) => s + metrics[k] * WEIGHTS[k], 0)
-  if (work.is_retracted) overall = Math.min(overall, 2)
-  overall = r1(overall)
-
-  const signal: Signal = work.is_retracted || overall < 4.5 ? "red" : overall < 7 ? "amber" : "green"
 
   const flags: ScoredWork["flags"] = []
   if (work.is_retracted) flags.push({ label: "Retracted", tone: "bad" })
   if (peerReviewed === true) flags.push({ label: "Peer reviewed", tone: "good" })
   if (peerReviewed === false) flags.push({ label: "Preprint", tone: "warn" })
-  if (peerReviewed === null) flags.push({ label: "Venue unverified", tone: "bad" })
+  if (peerReviewed === null) flags.push({ label: "Venue unverified", tone: "warn" })
   if (work.citation_normalized_percentile?.is_in_top_1_percent) flags.push({ label: "Top 1% cited", tone: "good" })
   if (work.open_access.is_oa) flags.push({ label: "Open access", tone: "neutral" })
   if (!work.doi) flags.push({ label: "No DOI", tone: "warn" })
+  if (work._sourcecheck.match?.confidence === "uncertain") flags.push({ label: "Check match", tone: "warn" })
 
-  return { work, metrics, raw, overall, signal, peerReviewed, flags }
+  return { work, assessment, metrics, overall, signal, facts, peerReviewed, flags }
 }
 
 export function formatAuthors(work: OpenAlexWork, max = 3) {

@@ -54,10 +54,17 @@ export function CompareView({ items, onRemove, onClear }: { items: ScoredWork[];
           <Card>
             <CardHeader>
               <CardTitle>Overlaid quality profiles</CardTitle>
-              <CardDescription>Same metrics for every paper, plotted on top of each other.</CardDescription>
+              <CardDescription>
+                AI ratings for every assessed paper, plotted on top of each other.
+                {items.some((it) => !it.assessment) && " Papers that are not assessed yet are left out."}
+              </CardDescription>
             </CardHeader>
             <CardContent>
-              <PaperRadar items={items} height={380} showLegend />
+              {items.some((it) => it.assessment) ? (
+                <PaperRadar items={items.filter((it) => it.assessment)} height={380} showLegend />
+              ) : (
+                <p className="text-muted-foreground py-16 text-center text-sm">None of the selected papers is assessed yet. Assess them in the source list first.</p>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -76,11 +83,17 @@ export function CompareView({ items, onRemove, onClear }: { items: ScoredWork[];
                   </div>
                 </CardHeader>
                 <CardContent className="px-2">
-                  <PaperRadar items={[it]} height={200} />
-                  <div className="flex items-center justify-center gap-3">
-                    <TrafficLight signal={it.signal} />
-                    <ScoreBadge score={it.overall} signal={it.signal} />
-                  </div>
+                  {it.assessment && it.signal && it.overall != null ? (
+                    <>
+                      <PaperRadar items={[it]} height={200} compact />
+                      <div className="flex items-center justify-center gap-3">
+                        <TrafficLight signal={it.signal} />
+                        <ScoreBadge score={it.overall} signal={it.signal} />
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-muted-foreground py-12 text-center text-sm">Not assessed yet</p>
+                  )}
                 </CardContent>
               </Card>
             ))}
@@ -93,7 +106,7 @@ export function CompareView({ items, onRemove, onClear }: { items: ScoredWork[];
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Metric</TableHead>
+                <TableHead>Criterion</TableHead>
                 {items.map((it, i) => (
                   <TableHead key={it.work.id} className="text-right">
                     <span className="inline-flex items-center gap-1.5">
@@ -107,13 +120,13 @@ export function CompareView({ items, onRemove, onClear }: { items: ScoredWork[];
             <TableBody>
               {METRICS.map((m) => {
                 const vals = items.map((it) => it.metrics[m.key])
-                const best = Math.max(...vals)
+                const best = Math.max(...vals.map((v) => v ?? -1))
                 return (
                   <TableRow key={m.key}>
                     <TableCell className="font-medium">{m.label}</TableCell>
                     {vals.map((v, i) => (
                       <TableCell key={i} className={`text-right tabular-nums ${v === best ? "font-semibold" : "text-muted-foreground"}`}>
-                        {v.toFixed(1)}
+                        {v == null ? "–" : v.toFixed(1)}
                       </TableCell>
                     ))}
                   </TableRow>
@@ -122,7 +135,7 @@ export function CompareView({ items, onRemove, onClear }: { items: ScoredWork[];
               <TableRow className="bg-muted/40">
                 <TableCell className="font-semibold">Overall</TableCell>
                 {items.map((it) => (
-                  <TableCell key={it.work.id} className="text-right font-semibold tabular-nums">{it.overall.toFixed(1)}</TableCell>
+                  <TableCell key={it.work.id} className="text-right font-semibold tabular-nums">{it.overall?.toFixed(1) ?? "–"}</TableCell>
                 ))}
               </TableRow>
             </TableBody>
