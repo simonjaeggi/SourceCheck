@@ -3,7 +3,7 @@
  * context, calls /api/assess and re-validates the answer. Used by the source list
  * ("Assess", "Assess all") and the detail sheet.
  */
-import type { OpenAlexWork } from "@/data/mockWorks"
+import type { OpenAlexWork } from "@/data/types"
 import {
   AssessmentRequestSchema,
   AssessmentResponseSchema,
@@ -35,7 +35,7 @@ export function buildRequest(w: OpenAlexWork, context: string): AssessmentReques
   const cut = (s: string) => s.slice(0, LIMITS.fact)
   const pr = peerReviewStatus(w)
   const details = w._sourcecheck.author_details
-  // OpenAlex records carry institution and h-index per author; mock records only names.
+  // Institution and h-index per author when OpenAlex has them, otherwise names only.
   const authors = details?.length
     ? details
         .map((d) => {

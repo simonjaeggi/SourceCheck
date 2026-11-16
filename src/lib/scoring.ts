@@ -1,4 +1,4 @@
-import type { OpenAlexWork } from "@/data/mockWorks"
+import type { OpenAlexWork } from "@/data/types"
 import { RATING_SCORE, type AssessmentResponse, type Verdict } from "@/lib/assessment"
 
 /**

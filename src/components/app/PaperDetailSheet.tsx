@@ -169,13 +169,6 @@ function Detail({ item, context, state, problem, onAssess }: { item: ScoredWork;
 
         {w._sourcecheck.match && <MatchNote item={item} />}
 
-        {w._semantic_scholar?.tldr && (
-          <p className="bg-muted/60 rounded-md px-3 py-2 text-sm">
-            <span className="text-muted-foreground mr-1 text-xs font-semibold uppercase">TL;DR</span>
-            {w._semantic_scholar.tldr}
-          </p>
-        )}
-
         <AiAssessment item={item} state={state} context={context} problem={problem} onAssess={onAssess} />
 
         {!item.assessment && (
@@ -226,7 +219,7 @@ function Detail({ item, context, state, problem, onAssess }: { item: ScoredWork;
         <Collapsible>
           <CollapsibleTrigger asChild>
             <Button variant="ghost" size="sm" className="text-muted-foreground -ml-2">
-              Raw API response {w._sourcecheck.origin === "openalex" ? "(OpenAlex)" : "(mock)"} <ChevronDown />
+              Raw OpenAlex record <ChevronDown />
             </Button>
           </CollapsibleTrigger>
           <CollapsibleContent>

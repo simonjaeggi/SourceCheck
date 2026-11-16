@@ -11,7 +11,7 @@
  * Set OPENALEX_API_KEY (free at openalex.org/settings/api). Without it, all
  * requests share an anonymous daily budget per IP, and searches are throttled.
  */
-import type { OpenAlexWork } from "../src/data/mockWorks"
+import type { OpenAlexWork } from "../src/data/types"
 import type { Unmatched } from "../src/lib/lookup"
 
 const BASE = "https://api.openalex.org"
@@ -160,7 +160,6 @@ function toWork(raw: RawWork, reference: string, match: NonNullable<OpenAlexWork
     _sourcecheck: {
       max_author_h_index: null,
       raw_reference: reference,
-      concepts: [],
       origin: "openalex",
       match,
       abstract: rebuildAbstract(raw.abstract_inverted_index),

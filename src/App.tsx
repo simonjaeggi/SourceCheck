@@ -16,7 +16,8 @@ import { BorderBeam } from "@/components/ui/border-beam"
 import { AnimatedShinyText } from "@/components/ui/animated-shiny-text"
 import { Spotlight } from "@/components/ui/spotlight"
 import { cn } from "@/lib/utils"
-import { mockWorks, SAMPLE_CONTEXT, SAMPLE_REFERENCES, type OpenAlexWork } from "@/data/mockWorks"
+import { SAMPLE_CONTEXT, SAMPLE_REFERENCES } from "@/data/example"
+import type { OpenAlexWork } from "@/data/types"
 import { contextProblem, requestAssessment, type AssessState } from "@/lib/assessClient"
 import { scoreWork, type ScoredWork, type Signal } from "@/lib/scoring"
 import { LOOKUP_ERROR_MESSAGES, LOOKUP_LIMITS, UNMATCHED_LABELS, type LookupResult, type Unmatched } from "@/lib/lookup"
@@ -38,24 +39,23 @@ const MAX_COMPARE = 5
 type SortKey = "score" | "year" | "citations" | "input"
 
 export default function App() {
-  const [references, setReferences] = useState(SAMPLE_REFERENCES)
-  const [context, setContext] = useState(SAMPLE_CONTEXT)
+  const [references, setReferences] = useState("")
+  const [context, setContext] = useState("")
   const [loading, setLoading] = useState(false)
-  const [works, setWorks] = useState<OpenAlexWork[] | null>(mockWorks)
+  /** null until the first successful lookup */
+  const [works, setWorks] = useState<OpenAlexWork[] | null>(null)
   /** AI assessment per work id; a source without an entry has not been assessed */
   const [assess, setAssess] = useState<Record<string, AssessState>>({})
   const [batch, setBatch] = useState<{ done: number; total: number } | null>(null)
   /** bumped on every new lookup, so late answers for the old list are dropped */
   const generation = useRef(0)
   const [unmatched, setUnmatched] = useState<Unmatched[]>([])
-  /** "mock" until the first successful OpenAlex lookup */
-  const [dataSource, setDataSource] = useState<"mock" | "openalex">("mock")
   const [openId, setOpenId] = useState<string | null>(null)
   const [selected, setSelected] = useState<string[]>([])
   const [tab, setTab] = useState("sources")
   const [sort, setSort] = useState<SortKey>("score")
   const [filter, setFilter] = useState<Signal | "all" | "pending">("all")
-  const [views, setViews] = useState<AdvancedViews>({ webster: true, timeline: false, apiFields: false })
+  const [views, setViews] = useState<AdvancedViews>({ timeline: true, apiFields: false })
   const [cmdOpen, setCmdOpen] = useState(false)
   // Lazy overlays stay mounted after first use so their close animations still run.
   const [sheetUsed, setSheetUsed] = useState(false)
@@ -141,7 +141,6 @@ export default function App() {
     setBatch(null)
     setWorks(body.works)
     setUnmatched(body.unmatched)
-    setDataSource("openalex")
     setTab("sources")
     const throttled = body.unmatched.filter((u) => u.reason === "openalex_rate_limited" || u.reason === "openalex_error").length
     const missing = body.unmatched.length - throttled
@@ -250,15 +249,6 @@ export default function App() {
               <span className="hidden flex-1 truncate text-left whitespace-nowrap md:inline">Search sources & actions…</span>
               <Kbd className="hidden sm:inline-flex">⌘K</Kbd>
             </button>
-            {dataSource === "mock" ? (
-              <Badge variant="outline" className="hidden border-amber-300 bg-amber-50 text-amber-800 sm:inline-flex">
-                Prototype with mock data
-              </Badge>
-            ) : (
-              <Badge variant="outline" className="hidden border-emerald-300 bg-emerald-50 text-emerald-800 sm:inline-flex">
-                Live OpenAlex data
-              </Badge>
-            )}
           </div>
         </header>
 
@@ -342,6 +332,8 @@ export default function App() {
               </div>
 
               {loading && <LoadingState n={refCount} />}
+
+              {!loading && !results && <EmptyState onExample={loadExample} />}
 
               {!loading && results && (
                 <>
@@ -530,6 +522,23 @@ function Chip({ active, onClick, children, group }: { active: boolean; onClick: 
       )}
       <span className="relative z-10 inline-flex items-center gap-1.5">{children}</span>
     </button>
+  )
+}
+
+function EmptyState({ onExample }: { onExample: () => void }) {
+  return (
+    <div className="bg-card flex flex-col items-center gap-3 rounded-xl border border-dashed px-6 py-16 text-center">
+      <ScanSearch className="text-muted-foreground size-8" />
+      <div>
+        <p className="font-medium">No sources checked yet</p>
+        <p className="text-muted-foreground mt-1 max-w-md text-sm">
+          Paste your reference list and your thesis topic and research question on the left, then click "Analyze sources". Each reference is looked up in OpenAlex, and you can then have the AI assess it.
+        </p>
+      </div>
+      <Button variant="outline" size="sm" onClick={onExample}>
+        <Sparkles />Load example
+      </Button>
+    </div>
   )
 }
 

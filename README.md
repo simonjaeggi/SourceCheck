@@ -1,7 +1,7 @@
 # SourceCheck prototype (layout v0.1)
 
 Clickable layout for the Seminar Prompt Engineering project: paste references + context, get a scored source list.
-"Analyze sources" looks each reference up in OpenAlex through `/api/lookup` (the page opens with mock data until you do).
+"Analyze sources" looks each reference up in OpenAlex through `/api/lookup`. "Load example" fills in a sample reference list and thesis context.
 The AI assessment (detail sheet → "Assess with AI") calls an LLM via OpenRouter through `/api/assess`, with the OpenAlex facts in the prompt.
 
 Stack: React 19, Vite, Tailwind CSS v4, shadcn/ui (new-york style, components in `src/components/ui`), Recharts.
@@ -45,7 +45,8 @@ The model must return JSON matching `AssessmentResponseSchema` (strict zod); if 
 to it, at most twice (3 model calls in total). After that the UI shows an error.
 
 ## Where things live
-- `src/data/mockWorks.ts`   mock responses shaped like OpenAlex /works + Semantic Scholar fields
+- `src/data/types.ts`       the source record (OpenAlex /works fields + SourceCheck fields)
+- `src/data/example.ts`     example input for "Load example"
 - `src/lib/scoring.ts`      eight rubric criteria; score and light from the AI assessment
 - `src/lib/assessClient.ts` builds the assessment request from a source and the thesis context
 - `src/lib/assessment.ts`   request/response DTOs (strict zod), limits, error codes, shared by UI and API
@@ -58,7 +59,7 @@ to it, at most twice (3 model calls in total). After that the UI shows an error.
 - `src/components/app/`     traffic light, source list, detail sheet, compare, advanced views
 - `src/App.tsx`             page layout
 
-## Planned data sources
-- OpenAlex: cited_by_count, fwci, citation_normalized_percentile, is_retracted (Retraction Watch), primary_location.source (type, is_core, is_in_doaj), open_access
-- Semantic Scholar Graph API: influentialCitationCount, publicationTypes, tldr
+## Data sources
+- In use: OpenAlex (cited_by_count, fwci, citation_normalized_percentile, is_retracted, primary_location.source, open_access, authors' h-index, abstract)
+- Possible later: Semantic Scholar Graph API (influentialCitationCount, publicationTypes, tldr)
 - Crossref: publisher metadata (ACM has no public metadata API of its own; its DOIs are in Crossref)
