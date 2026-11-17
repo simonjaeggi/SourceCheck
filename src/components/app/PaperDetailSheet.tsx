@@ -196,7 +196,7 @@ function Detail({ item, context, state, problem, onAssess }: { item: ScoredWork;
             <BarChart data={timeline} margin={{ left: -16, right: 4 }}>
               <XAxis dataKey="year" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
               <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
-              <Tooltip cursor={{ fill: "var(--muted)" }} contentStyle={{ borderRadius: 8, fontSize: 12 }} />
+              <Tooltip cursor={{ fill: "var(--hover)" }} contentStyle={{ borderRadius: 8, fontSize: 12, background: "var(--popover)", color: "var(--popover-foreground)", border: "1px solid var(--border)" }} />
               <Bar dataKey="cited_by_count" name="Citations" fill="var(--chart-1)" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>

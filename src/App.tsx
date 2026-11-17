@@ -1,5 +1,5 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { BookCheck, FileText, Loader2, ScanSearch, Sparkles, ListChecks, GitCompareArrows, SlidersHorizontal, Info, Search, X, ArrowRight } from "lucide-react"
+import { FileText, Loader2, ScanSearch, Sparkles, ListChecks, GitCompareArrows, SlidersHorizontal, Info, Search, X, ArrowRight } from "lucide-react"
 import { AnimatePresence, MotionConfig, motion } from "motion/react"
 import NumberFlow from "@number-flow/react"
 import { toast } from "sonner"
@@ -24,6 +24,7 @@ import { LOOKUP_ERROR_MESSAGES, LOOKUP_LIMITS, UNMATCHED_LABELS, type LookupResu
 import { SourceList } from "@/components/app/SourceList"
 import type { AdvancedViews } from "@/components/app/AdvancedView"
 import { TrafficLight } from "@/components/app/TrafficLight"
+import { ThemePicker } from "@/components/app/ThemePicker"
 
 // Heavy, below-the-fold UI (Recharts, cmdk, vaul) is code-split so the first paint only ships the source list.
 const loadSheet = () => import("@/components/app/PaperDetailSheet")
@@ -227,15 +228,13 @@ export default function App() {
         {/* Decorative backdrop: Magic UI dot pattern + Aceternity spotlight */}
         <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[420px] overflow-hidden">
           {/* Dot grid (Magic UI DotPattern look) as a single CSS background instead of ~1,500 SVG nodes */}
-          <div className="absolute inset-0 [background-image:radial-gradient(var(--color-neutral-300)_1px,transparent_1px)] [background-size:22px_22px] [mask-image:radial-gradient(ellipse_70%_100%_at_30%_0%,black_30%,transparent_75%)] opacity-70" />
+          <div className="absolute inset-0 [background-image:radial-gradient(var(--faint)_1px,transparent_1px)] [background-size:22px_22px] [mask-image:radial-gradient(ellipse_70%_100%_at_30%_0%,black_30%,transparent_75%)] opacity-70" />
           <Spotlight className="-top-40 left-0 md:-top-20 md:left-60" fill="var(--chart-1)" />
         </div>
 
         <header className="bg-card/70 sticky top-0 z-40 border-b backdrop-blur-md">
           <div className="mx-auto flex h-14 max-w-[1400px] items-center gap-3 px-4">
-            <div className="bg-primary text-primary-foreground grid size-8 place-items-center rounded-lg shadow-sm">
-              <BookCheck className="size-4" />
-            </div>
+            <img src="https://design.jaeggisimon.ch/api/icons/icon.svg?letter=s&preset=indigo" alt="" className="size-8" />
             <div className="leading-tight">
               <p className="font-semibold tracking-tight">SourceCheck</p>
               <p className="text-muted-foreground hidden text-xs sm:block">Evaluate the references in your paper</p>
@@ -249,6 +248,7 @@ export default function App() {
               <span className="hidden flex-1 truncate text-left whitespace-nowrap md:inline">Search sources & actions…</span>
               <Kbd className="hidden sm:inline-flex">⌘K</Kbd>
             </button>
+            <ThemePicker />
           </div>
         </header>
 
@@ -415,15 +415,15 @@ export default function App() {
                           animate={{ y: 0, opacity: 1 }}
                           exit={{ y: 24, opacity: 0 }}
                           transition={{ type: "spring", bounce: 0.2, duration: 0.4 }}
-                          className="sticky bottom-4 z-30 mx-auto flex w-fit items-center gap-2 rounded-full border bg-neutral-900 py-1.5 pr-1.5 pl-4 text-sm text-white shadow-lg"
+                          className="sticky bottom-4 z-30 mx-auto flex w-fit items-center gap-2 rounded-full border bg-foreground py-1.5 pr-1.5 pl-4 text-sm text-background shadow-lg"
                         >
                           <span className="tabular-nums">
                             <NumberFlow locales="en-US" value={selected.length} /> of {MAX_COMPARE} selected
                           </span>
-                          <Button size="sm" variant="ghost" className="h-7 rounded-full text-white/70 hover:bg-white/10 hover:text-white" onClick={() => setSelected([])}>
+                          <Button size="sm" variant="ghost" className="h-7 rounded-full text-background/70 hover:bg-background/10 hover:text-background" onClick={() => setSelected([])}>
                             <X />Clear
                           </Button>
-                          <Button size="sm" className="h-7 rounded-full bg-white text-neutral-900 hover:bg-white/90" disabled={selected.length < 2} onClick={() => setTab("compare")}>
+                          <Button size="sm" className="h-7 rounded-full bg-background text-foreground hover:bg-background/90" disabled={selected.length < 2} onClick={() => setTab("compare")}>
                             Compare<ArrowRight />
                           </Button>
                         </motion.div>

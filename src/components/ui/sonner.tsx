@@ -1,10 +1,13 @@
 import { CircleCheckIcon, InfoIcon, Loader2Icon, OctagonXIcon, TriangleAlertIcon } from "lucide-react"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
+import { useTheme } from "@/lib/theme"
 
-// shadcn/ui sonner wrapper. The app has no dark mode, so the theme is fixed to light (no next-themes needed).
-const Toaster = ({ ...props }: ToasterProps) => (
+// shadcn/ui sonner wrapper; follows the light/dark mode of the shared palette.
+const Toaster = ({ ...props }: ToasterProps) => {
+  const { dark } = useTheme()
+  return (
   <Sonner
-    theme="light"
+    theme={dark ? "dark" : "light"}
     className="toaster group"
     icons={{
       success: <CircleCheckIcon className="size-4" />,
@@ -23,6 +26,7 @@ const Toaster = ({ ...props }: ToasterProps) => (
     }
     {...props}
   />
-)
+  )
+}
 
 export { Toaster }

@@ -4,6 +4,45 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SourceCheck</title>
+    <!-- App icon from the generator at design.jaeggisimon.ch (letter "s", indigo preset). -->
+    <link rel="icon" type="image/svg+xml" href="https://design.jaeggisimon.ch/api/icons/favicon.svg?letter=s&amp;preset=indigo" />
+    <!-- Shared colour palettes; a change on design.jaeggisimon.ch reaches this app within ~5 minutes. -->
+    <link rel="stylesheet" href="https://design.jaeggisimon.ch/api/palettes.css" crossorigin="anonymous" />
+    <script>
+      // Sets data-palette and data-mode before first paint (same storage format as the design site).
+      // The palette ids are read from the imported stylesheet itself, so nothing is hardcoded here.
+      ;(function () {
+        var K = "design-theme", d = document.documentElement, s = {}, ids = []
+        for (var i = 0; i < document.styleSheets.length; i++) {
+          var sh = document.styleSheets[i]
+          if (!sh.href || sh.href.indexOf("/api/palettes.css") < 0) continue
+          try {
+            for (var j = 0; j < sh.cssRules.length; j++) {
+              var m = /data-palette="([a-z0-9-]+)"/.exec(sh.cssRules[j].selectorText || "")
+              if (m && ids.indexOf(m[1]) < 0) ids.push(m[1])
+            }
+          } catch (e) {}
+        }
+        window.__palettes = ids
+        try { s = JSON.parse(localStorage.getItem(K) || "{}") || {} } catch (e) {}
+        var mode = ["system", "light", "dark"].indexOf(s.mode) >= 0 ? s.mode : "system"
+        var pal = typeof s.palette === "string" && ids.indexOf(s.palette) >= 0 ? s.palette : ids[0] || ""
+        var mq = matchMedia("(prefers-color-scheme: dark)")
+        function apply() {
+          d.setAttribute("data-mode", mode === "dark" || (mode === "system" && mq.matches) ? "dark" : "light")
+          if (pal) d.setAttribute("data-palette", pal)
+        }
+        apply()
+        mq.addEventListener("change", function () { if (mode === "system") apply() })
+        window.__getTheme = function () { return { mode: mode, palette: pal } }
+        window.__setTheme = function (n) {
+          if (n.mode) mode = n.mode
+          if (n.palette) pal = n.palette
+          try { localStorage.setItem(K, JSON.stringify({ mode: mode, palette: pal })) } catch (e) {}
+          apply()
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

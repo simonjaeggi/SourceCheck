@@ -65,7 +65,7 @@ function Timeline({ items, usingSelection }: { items: ScoredWork[]; usingSelecti
             <CartesianGrid stroke="var(--border)" vertical={false} />
             <XAxis dataKey="year" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
             <YAxis scale="log" domain={[1, "auto"]} allowDataOverflow tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
-            <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12 }} />
+            <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12, background: "var(--popover)", color: "var(--popover-foreground)", border: "1px solid var(--border)" }} />
             <Legend wrapperStyle={{ fontSize: 12 }} />
             {items.map((it, i) => (
               <Line key={it.work.id} dataKey={`s${i}`} name={shortTitle(it.work.display_name, 28)} stroke={SERIES_COLORS[i % 5]} strokeWidth={2} dot={{ r: 2 }} />

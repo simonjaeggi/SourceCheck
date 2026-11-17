@@ -1,36 +1,43 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-@custom-variant dark (&:is(.dark *));
+@custom-variant dark (&:is([data-mode="dark"] *));
 
+/*
+ * All colours come from the shared palettes (design.jaeggisimon.ch/api/palettes.css, linked in
+ * index.html), which define --bg, --ink, --muted, --faint, --line, --hover, --field, --red,
+ * --purple, --green, --on-red and --on-purple per data-palette and data-mode.
+ */
+
+/* The app's (shadcn) tokens, mapped onto the palette. The palettes have no amber, so the
+   "usable with reservations" signal is mixed from the palette's red and green. */
 :root {
   --radius: 0.625rem;
-  --background: oklch(0.985 0.002 247);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.55 0.2 264);
-  --chart-2: oklch(0.65 0.17 162);
-  --chart-3: oklch(0.7 0.17 55);
-  --chart-4: oklch(0.6 0.22 330);
-  --chart-5: oklch(0.6 0.15 220);
-  --signal-green: oklch(0.68 0.17 150);
-  --signal-amber: oklch(0.8 0.16 80);
-  --signal-red: oklch(0.62 0.22 25);
+  --background: var(--bg);
+  --foreground: var(--ink);
+  --card: var(--field);
+  --card-foreground: var(--ink);
+  --popover: var(--field);
+  --popover-foreground: var(--ink);
+  --primary: var(--purple);
+  --primary-foreground: var(--on-purple);
+  --secondary: var(--hover);
+  --secondary-foreground: var(--ink);
+  --muted-foreground: var(--muted);
+  --accent: var(--hover);
+  --accent-foreground: var(--ink);
+  --destructive: var(--red);
+  --border: var(--line);
+  --input: var(--line);
+  --ring: var(--purple);
+  --signal-green: var(--green);
+  --signal-amber: color-mix(in oklch, var(--red), var(--green));
+  --signal-red: var(--red);
+  --chart-1: var(--purple);
+  --chart-2: var(--green);
+  --chart-3: var(--signal-amber);
+  --chart-4: var(--red);
+  --chart-5: color-mix(in oklch, var(--purple) 45%, var(--green));
 }
 
 @theme inline {
@@ -48,7 +55,7 @@
   --color-primary-foreground: var(--primary-foreground);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted);
+  --color-muted: var(--hover);
   --color-muted-foreground: var(--muted-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);

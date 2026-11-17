@@ -27,7 +27,7 @@ export function PaperRadar({ items, height = 280, showLegend = false, compact = 
             dot={{ r: 2.5 }}
           />
         ))}
-        <Tooltip contentStyle={{ borderRadius: 8, border: "1px solid var(--border)", fontSize: 12 }} />
+        <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12, background: "var(--popover)", color: "var(--popover-foreground)", border: "1px solid var(--border)" }} />
         {showLegend && <Legend wrapperStyle={{ fontSize: 12 }} />}
       </RadarChart>
     </ResponsiveContainer>
