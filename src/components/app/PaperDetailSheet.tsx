@@ -1,5 +1,5 @@
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
-import { Check, ChevronDown, Copy, ExternalLink } from "lucide-react"
+import { Check, ChevronDown, Copy, ExternalLink, PencilLine } from "lucide-react"
 import { toast } from "sonner"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from "@/components/ui/drawer"
@@ -25,6 +25,7 @@ export function PaperDetailSheet({
   assessState,
   problem,
   onAssess,
+  onEditDetails,
 }: {
   item: ScoredWork | null
   context: string
@@ -32,6 +33,8 @@ export function PaperDetailSheet({
   assessState: AssessState | undefined
   problem: string | null
   onAssess: (id: string) => void
+  /** opens "Add details" / "Edit details" for this source */
+  onEditDetails: (item: ScoredWork) => void
 }) {
   const isDesktop = useMediaQuery("(min-width: 640px)")
 
@@ -42,7 +45,7 @@ export function PaperDetailSheet({
           {item && (
             <div className="overflow-y-auto">
               <DetailHeader item={item} Title={DrawerTitle} Description={DrawerDescription} Wrapper={DrawerHeader} />
-              <Detail key={item.work.id} item={item} context={context} state={assessState} problem={problem} onAssess={() => onAssess(item.work.id)} />
+              <Detail key={item.work.id} item={item} context={context} state={assessState} problem={problem} onAssess={() => onAssess(item.work.id)} onEditDetails={() => onEditDetails(item)} />
             </div>
           )}
         </DrawerContent>
@@ -56,7 +59,7 @@ export function PaperDetailSheet({
         {item && (
           <>
             <DetailHeader item={item} Title={SheetTitle} Description={SheetDescription} Wrapper={SheetHeader} />
-            <Detail key={item.work.id} item={item} context={context} state={assessState} problem={problem} onAssess={() => onAssess(item.work.id)} />
+            <Detail key={item.work.id} item={item} context={context} state={assessState} problem={problem} onAssess={() => onAssess(item.work.id)} onEditDetails={() => onEditDetails(item)} />
           </>
         )}
       </SheetContent>
@@ -75,7 +78,7 @@ function DetailHeader({ item, Title, Description, Wrapper }: { item: ScoredWork;
         <div className="min-w-0 flex-1">
           <Title className="text-lg leading-snug">{w.display_name}</Title>
           <Description className="mt-1">
-            {formatAuthors(w, 5)} ({w.publication_year})
+            {formatAuthors(w, 5)}{w.publication_year ? ` (${w.publication_year})` : ""}
           </Description>
           <p className="text-muted-foreground mt-0.5 text-sm italic">{w.primary_location.source?.display_name ?? "Unknown venue"}</p>
         </div>
@@ -156,10 +159,12 @@ function MatchNote({ item }: { item: ScoredWork }) {
   )
 }
 
-type AssessProps = { state: AssessState | undefined; problem: string | null; onAssess: () => void }
+type AssessProps = { state: AssessState | undefined; problem: string | null; onAssess: () => void; onEditDetails: () => void }
 
-function Detail({ item, context, state, problem, onAssess }: { item: ScoredWork; context: string } & AssessProps) {
+function Detail({ item, context, state, problem, onAssess, onEditDetails }: { item: ScoredWork; context: string } & AssessProps) {
   const w = item.work
+  const manual = w._sourcecheck.origin === "manual"
+  const hasDetails = !!w._sourcecheck.details
   const timeline = [...w.counts_by_year].sort((a, b) => a.year - b.year)
   return (
     <>
@@ -176,12 +181,20 @@ function Detail({ item, context, state, problem, onAssess }: { item: ScoredWork;
         </div>
 
         {w._sourcecheck.match && <MatchNote item={item} />}
+        {manual && (
+          <p className="text-muted-foreground text-xs">Not in OpenAlex. The AI assesses this source from your reference and the details you entered.</p>
+        )}
 
         <AiAssessment item={item} state={state} context={context} problem={problem} onAssess={onAssess} />
 
         {!item.assessment && (
           <section>
-            <h3 className="mb-2 text-sm font-semibold">What the AI will get <span className="text-muted-foreground font-normal">(per criterion)</span></h3>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold">What the AI will get <span className="text-muted-foreground font-normal">(per criterion)</span></h3>
+              <Button variant="ghost" size="sm" className="h-7" onClick={onEditDetails}>
+                <PencilLine />{hasDetails ? "Edit details" : "Add details"}
+              </Button>
+            </div>
             <Table>
               <TableBody>
                 {METRICS.map((m) => (
@@ -198,7 +211,7 @@ function Detail({ item, context, state, problem, onAssess }: { item: ScoredWork;
           </section>
         )}
 
-        <section>
+        {!manual && <section>
           <h3 className="mb-2 text-sm font-semibold">Citations per year</h3>
           <ResponsiveContainer width="100%" height={140}>
             <BarChart data={timeline} margin={{ left: -16, right: 4 }}>
@@ -208,7 +221,7 @@ function Detail({ item, context, state, problem, onAssess }: { item: ScoredWork;
               <Bar dataKey="cited_by_count" name="Citations" fill="var(--chart-1)" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
-        </section>
+        </section>}
 
         <Separator />
 
@@ -219,15 +232,26 @@ function Detail({ item, context, state, problem, onAssess }: { item: ScoredWork;
               <a href={w.doi} target="_blank" rel="noreferrer">DOI <ExternalLink /></a>
             </Button>
           )}
-          <Button variant="outline" size="sm" asChild>
-            <a href={w.id} target="_blank" rel="noreferrer">OpenAlex <ExternalLink /></a>
+          {manual ? (
+            w._sourcecheck.details?.link?.startsWith("http") && (
+              <Button variant="outline" size="sm" asChild>
+                <a href={w._sourcecheck.details.link} target="_blank" rel="noreferrer">Link <ExternalLink /></a>
+              </Button>
+            )
+          ) : (
+            <Button variant="outline" size="sm" asChild>
+              <a href={w.id} target="_blank" rel="noreferrer">OpenAlex <ExternalLink /></a>
+            </Button>
+          )}
+          <Button variant="outline" size="sm" onClick={onEditDetails}>
+            <PencilLine />{hasDetails ? "Edit details" : "Add details"}
           </Button>
         </div>
 
         <Collapsible>
           <CollapsibleTrigger asChild>
             <Button variant="ghost" size="sm" className="text-muted-foreground -ml-2">
-              Raw OpenAlex record <ChevronDown />
+              {manual ? "Raw record" : "Raw OpenAlex record"} <ChevronDown />
             </Button>
           </CollapsibleTrigger>
           <CollapsibleContent>

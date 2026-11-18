@@ -18,8 +18,10 @@ import {
   type AssessmentRequest,
   type AssessmentResponse,
 } from "../src/lib/assessment.js"
-import { PROMPT_VERSION, SYSTEM_PROMPT, buildRepairMessage, buildUserMessage } from "./prompt.js"
+import { PROMPT_TEXTS, PROMPT_VERSION, buildRepairMessage, buildUserMessage } from "./prompt.js"
+import { PromptIdSchema, type PromptId } from "../src/lib/prompts.js"
 import { checkRateLimit } from "./rateLimit.js"
+import { isAllowedModel } from "./models.js"
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 /**
@@ -73,7 +75,8 @@ export class UpstreamError extends Error {
   }
 }
 
-export function openRouterCaller(apiKey = process.env.OPENROUTER_API_KEY ?? "", models: string | string[] = modelNames()): CallModel {
+export function openRouterCaller(apiKey = process.env.OPENROUTER_API_KEY ?? "", models: string | string[] = modelNames(), prompt: PromptId = PROMPT_VERSION): CallModel {
+  const system = PROMPT_TEXTS[prompt]
   const list = Array.isArray(models) ? models : [models]
   // Hard stop: never send a request to a paid model.
   const paid = list.filter((m) => !isFreeModel(m))
@@ -86,7 +89,7 @@ export function openRouterCaller(apiKey = process.env.OPENROUTER_API_KEY ?? "", 
       body: JSON.stringify({
         ...(list.length > 1 ? { models: list } : { model: list[0] }),
         max_tokens: MAX_TOKENS,
-        messages: [{ role: "system", content: SYSTEM_PROMPT }, ...messages],
+        messages: [{ role: "system", content: system }, ...messages],
         response_format: { type: "json_schema", json_schema: { name: "source_assessment", strict: true, schema: OUTPUT_SCHEMA } },
         // Only route to providers that honour response_format, never silently drop it.
         provider: { require_parameters: true },
@@ -142,8 +145,8 @@ class AssessError extends Error {
 }
 
 /** Starts an empty trace for the dev panel; runAssessment fills it in as it goes, also when it fails. */
-export function newTrace(models: string[] = modelNames()): AssessDebug {
-  return { prompt_version: PROMPT_VERSION, models_requested: models, user_message: "", attempts: [], total_ms: 0 }
+export function newTrace(models: string[] = modelNames(), prompt: PromptId = PROMPT_VERSION): AssessDebug {
+  return { prompt_version: prompt, models_requested: models, user_message: "", attempts: [], total_ms: 0 }
 }
 
 export async function runAssessment(req: AssessmentRequest, callModel: CallModel, log: (msg: string) => void = console.warn, trace: AssessDebug = newTrace()) {
@@ -233,7 +236,13 @@ export function sameOrigin(request: Request) {
   }
 }
 
-export async function handleAssess(request: Request, deps: { callModel?: CallModel; rateLimit?: typeof checkRateLimit } = {}): Promise<Response> {
+/** Optional model chosen in the UI; absent means the configured default (with fallback). */
+const ModelIdSchema = z.string().max(120).regex(/^[\w.\-/:]+$/).optional()
+
+export async function handleAssess(
+  request: Request,
+  deps: { callModel?: CallModel; rateLimit?: typeof checkRateLimit; isAllowedModel?: (id: string) => Promise<boolean> } = {}
+): Promise<Response> {
   if (!sameOrigin(request)) return fail("forbidden_origin")
 
   // Size cap before parsing: read at most requestBytes.
@@ -248,8 +257,18 @@ export async function handleAssess(request: Request, deps: { callModel?: CallMod
   } catch {
     return fail("invalid_request", { message: "The request body is not valid JSON." })
   }
-  const input = AssessmentRequestSchema.safeParse(body)
+  // An optional "model" sits next to the case; it is not part of what the model sees.
+  const { model: requested, prompt: requestedPrompt, ...caseBody } = (body && typeof body === "object" ? body : {}) as Record<string, unknown>
+  const input = AssessmentRequestSchema.safeParse(caseBody)
   if (!input.success) return fail("invalid_request", { message: `${ERROR_MESSAGES.invalid_request}\n${formatIssues(input.error, 5)}` })
+  // A prompt is chosen by id only; the texts stay on the server.
+  const prompt = PromptIdSchema.optional().safeParse(requestedPrompt)
+  if (!prompt.success) return fail("invalid_request", { message: "Unknown prompt." })
+  const promptId: PromptId = prompt.data ?? PROMPT_VERSION
+  const model = ModelIdSchema.safeParse(requested)
+  if (!model.success) return fail("invalid_request", { message: "The model name is not valid." })
+  if (model.data && !(await (deps.isAllowedModel ?? isAllowedModel)(model.data)))
+    return fail("invalid_request", { message: `"${model.data}" is not one of the free models with structured outputs.` })
 
   if (!deps.callModel && !process.env.OPENROUTER_API_KEY) return fail("not_configured")
   if (!deps.callModel && !modelNames().every(isFreeModel)) {
@@ -265,11 +284,19 @@ export async function handleAssess(request: Request, deps: { callModel?: CallMod
     return fail("upstream_error")
   }
 
-  const trace = newTrace()
+  const trace = newTrace(undefined, promptId)
   const debug = debugEnabled() ? trace : undefined
   try {
-    const { assessment, attempts, model } = await runAssessment(input.data, deps.callModel ?? openRouterCaller(), undefined, trace)
-    const body: AssessResult = { ok: true, assessment, meta: { model: model ?? modelName(), prompt_version: PROMPT_VERSION, attempts }, ...(debug ? { debug } : {}) }
+    // A chosen model runs alone (no fallback), so repeated test runs really use that model.
+    const caller = deps.callModel ?? openRouterCaller(undefined, model.data ? [model.data] : modelNames(), promptId)
+    if (model.data) trace.models_requested = [model.data]
+    const { assessment, attempts, model: answered } = await runAssessment(input.data, caller, undefined, trace)
+    const body: AssessResult = {
+      ok: true,
+      assessment,
+      meta: { model: answered ?? model.data ?? modelName(), prompt_version: promptId, attempts },
+      ...(debug ? { debug } : {}),
+    }
     return Response.json(body, { headers: { "Cache-Control": "no-store" } })
   } catch (e) {
     if (e instanceof AssessError) return fail(e.code, { message: e.message, debug })

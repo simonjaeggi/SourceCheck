@@ -78,7 +78,7 @@ export function CompareView({ items, onRemove, onClear }: { items: ScoredWork[];
                     <span className="mt-1 size-2.5 shrink-0 rounded-full" style={{ background: SERIES_COLORS[i] }} />
                     <div className="min-w-0">
                       <CardTitle className="text-sm leading-snug">{shortTitle(it.work.display_name, 60)}</CardTitle>
-                      <CardDescription className="text-xs">{formatAuthors(it.work, 2)} ({it.work.publication_year})</CardDescription>
+                      <CardDescription className="text-xs">{formatAuthors(it.work, 2)}{it.work.publication_year ? ` (${it.work.publication_year})` : ""}</CardDescription>
                     </div>
                   </div>
                 </CardHeader>

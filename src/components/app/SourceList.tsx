@@ -1,4 +1,4 @@
-import { AlertTriangle, ChevronRight, Globe, Loader2, SearchX, Sparkles, SquareArrowOutUpRight } from "lucide-react"
+import { AlertTriangle, ChevronRight, Globe, Loader2, PencilLine, SearchX, Sparkles, SquareArrowOutUpRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { AssessState } from "@/lib/assessClient"
 import { AnimatePresence, motion } from "motion/react"
@@ -22,9 +22,11 @@ interface Props {
   onAssess: (id: string) => void
   /** why assessing is not possible yet (e.g. no thesis context), else null */
   assessProblem: string | null
+  /** opens "Add details" for a web source */
+  onAddDetails: (source: Unmatched) => void
 }
 
-export function SourceList({ rows, selected, onToggle, onOpen, maxCompare, assess, onAssess, assessProblem }: Props) {
+export function SourceList({ rows, selected, onToggle, onOpen, maxCompare, assess, onAssess, assessProblem, onAddDetails }: Props) {
   if (rows.length === 0) {
     return (
       <div className="bg-card flex flex-col items-center gap-2 rounded-xl border border-dashed py-12 text-center">
@@ -38,7 +40,7 @@ export function SourceList({ rows, selected, onToggle, onOpen, maxCompare, asses
     <ul className="bg-card divide-y overflow-hidden rounded-xl border shadow-xs">
       <AnimatePresence initial={true} mode="popLayout">
       {rows.map((row, i) => {
-        if (row.kind === "web") return <WebRow key={`web-${row.source.index}`} source={row.source} i={i} />
+        if (row.kind === "web") return <WebRow key={`web-${row.source.index}`} source={row.source} i={i} onAddDetails={() => onAddDetails(row.source)} />
         const it = row.item
         const w = it.work
         const idx = selected.indexOf(w.id)
@@ -70,17 +72,23 @@ export function SourceList({ rows, selected, onToggle, onOpen, maxCompare, asses
               <div className="min-w-0 flex-1">
                 <p className="truncate font-medium group-hover:underline">{w.display_name}</p>
                 <p className="text-muted-foreground truncate text-sm">
-                  {formatAuthors(w)} ({w.publication_year})
+                  {formatAuthors(w)}{w.publication_year ? ` (${w.publication_year})` : ""}
                 </p>
                 <p className="text-muted-foreground truncate text-xs italic">
-                  {w.primary_location.source?.display_name ?? "Unknown venue"}
+                  {w.primary_location.source?.display_name ?? (w._sourcecheck.origin === "manual" ? "Venue not given" : "Unknown venue")}
                   {w.primary_location.source?.host_organization_name ? `, ${w.primary_location.source.host_organization_name}` : ""}
                 </p>
                 <FlagBadges flags={it.flags} className="mt-1.5" />
               </div>
               <div className="hidden text-right text-xs sm:block">
-                <div className="font-medium tabular-nums">{w.cited_by_count.toLocaleString("en-US")}</div>
-                <div className="text-muted-foreground">citations</div>
+                {w._sourcecheck.origin === "manual" ? (
+                  <div className="text-muted-foreground max-w-24 leading-tight">not in OpenAlex</div>
+                ) : (
+                  <>
+                    <div className="font-medium tabular-nums">{w.cited_by_count.toLocaleString("en-US")}</div>
+                    <div className="text-muted-foreground">citations</div>
+                  </>
+                )}
               </div>
             </button>
             <AssessCell item={it} state={assess[w.id]} onAssess={() => onAssess(w.id)} problem={assessProblem} />
@@ -96,7 +104,7 @@ export function SourceList({ rows, selected, onToggle, onOpen, maxCompare, asses
 }
 
 /** A web source: listed with its link, but not looked up in OpenAlex and not assessed for now. */
-function WebRow({ source, i }: { source: Unmatched; i: number }) {
+function WebRow({ source, i, onAddDetails }: { source: Unmatched; i: number; onAddDetails: () => void }) {
   const web = source.web
   const title = web?.title ?? source.reference
   const when = web?.year ? String(web.year) : web?.accessed ? `accessed ${web.accessed}` : null
@@ -127,9 +135,9 @@ function WebRow({ source, i }: { source: Unmatched; i: number }) {
         </p>
         <FlagBadges flags={[{ label: "Web source", tone: "neutral" }]} className="mt-1.5" />
       </div>
-      <span className="text-muted-foreground w-[7.5rem] text-center text-xs" title="OpenAlex only indexes scholarly works, so web sources are not looked up or assessed for now.">
-        Not assessed
-      </span>
+      <Button variant="outline" size="sm" className="w-[7.5rem]" onClick={onAddDetails} title="Not in OpenAlex. Enter its details (type, publisher, authors, …) so the AI can assess it.">
+        <PencilLine /> Add details
+      </Button>
       {web?.url ? (
         <a href={web.url} target="_blank" rel="noreferrer" aria-label="Open link" className="focus-visible:ring-ring/50 rounded-md outline-none focus-visible:ring-[3px]">
           <SquareArrowOutUpRight className="text-muted-foreground size-4 shrink-0" />

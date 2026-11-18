@@ -2,6 +2,9 @@
  * A source as the app uses it: an OpenAlex /works record (only the fields we read),
  * plus SourceCheck's own fields under `_sourcecheck`. Built by server/openalex.ts.
  */
+/** Facts you can enter for a source, the same rows as the expert form. All optional except a title for manual sources. */
+export type SourceDetails = Partial<Record<"title" | "use" | "source_type" | "venue" | "authors" | "year" | "peer_review" | "venue_metric" | "citations" | "link" | "abstract", string>>
+
 export type SourceType = "journal" | "conference" | "repository" | "book series" | "ebook platform" | (string & {})
 
 export interface OpenAlexWork {
@@ -43,8 +46,12 @@ export interface OpenAlexWork {
     raw_reference: string
     /** position of that reference in the pasted list (0-based), for "Input order" */
     input_index?: number
-    /** where this record came from */
-    origin: "openalex"
+    /** where this record came from: OpenAlex, or details you entered for a source OpenAlex does not have */
+    origin: "openalex" | "manual"
+    /** facts you entered; for an OpenAlex record they replace OpenAlex's value for that fact */
+    details?: SourceDetails
+    /** for a manual source: the unmatched entry it was made from, so removing the details restores it */
+    unmatched?: { reason: string; web?: { title: string; url: string | null; site: string | null; year: number | null; accessed: number | null } }
     /** how the reference was matched to the OpenAlex record */
     match?: {
       method: "doi" | "title_search"

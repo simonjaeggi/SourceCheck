@@ -5,17 +5,39 @@ import { Label } from "@/components/ui/label"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { SERIES_COLORS, type ScoredWork } from "@/lib/scoring"
 import { shortTitle } from "./PaperRadar"
+import { ExportPanel, TestRunPanel } from "./ResearchTools"
+import type { OpenAlexWork } from "@/data/types"
+import type { AssessState, ModelOption } from "@/lib/assessClient"
+import type { Unmatched } from "@/lib/lookup"
+import type { useTestRuns } from "@/lib/useTestRuns"
 
-export type AdvancedViews = { timeline: boolean; apiFields: boolean }
+export type AdvancedViews = { exports: boolean; testRuns: boolean; timeline: boolean; apiFields: boolean }
+
+/** Data for the export and test-run tools. */
+export type ResearchProps = {
+  works: OpenAlexWork[]
+  selectedWorks: OpenAlexWork[]
+  assess: Record<string, AssessState>
+  context: string
+  contextProblem: string | null
+  web: Unmatched[]
+  models: ModelOption[]
+  defaults: string[]
+  model: string
+  prompt: string
+  runner: ReturnType<typeof useTestRuns>
+}
 
 const VIEWS: { key: keyof AdvancedViews; label: string; desc: string }[] = [
+  { key: "exports", label: "Export", desc: "Download the JSON of every paper: reference, OpenAlex record, AI input and assessment" },
+  { key: "testRuns", label: "Test runs", desc: "Assess the papers n times with one model and export all answers" },
   { key: "timeline", label: "Citation trajectory", desc: "Citations per year, from OpenAlex counts_by_year" },
   { key: "apiFields", label: "Raw indicator table", desc: "Unscored API fields for all sources (for power users)" },
 ]
 
 export function AdvancedView({
-  items, compareItems, views, onChange,
-}: { items: ScoredWork[]; compareItems: ScoredWork[]; views: AdvancedViews; onChange: (v: AdvancedViews) => void }) {
+  items, compareItems, views, onChange, research,
+}: { items: ScoredWork[]; compareItems: ScoredWork[]; views: AdvancedViews; onChange: (v: AdvancedViews) => void; research: ResearchProps }) {
   return (
     <div className="flex flex-col gap-4">
       <Card className="gap-3 py-4">
@@ -36,9 +58,24 @@ export function AdvancedView({
         </CardContent>
       </Card>
 
-      {views.timeline && <Timeline items={compareItems.length ? compareItems : items.slice(0, 4)} usingSelection={compareItems.length > 0} />}
-      {views.apiFields && <ApiFields items={items} />}
-      {!views.timeline && !views.apiFields && (
+      {views.exports && <ExportPanel works={research.works} assess={research.assess} context={research.context} web={research.web} />}
+      {(views.testRuns || research.runner.running) && (
+        <TestRunPanel
+          works={research.works}
+          selected={research.selectedWorks}
+          context={research.context}
+          contextProblem={research.contextProblem}
+          models={research.models}
+          defaults={research.defaults}
+          model={research.model}
+          prompt={research.prompt}
+          runner={research.runner}
+        />
+      )}
+      {/* OpenAlex-only views leave out sources you described yourself */}
+      {views.timeline && <Timeline items={(compareItems.length ? compareItems : items).filter((i) => i.work._sourcecheck.origin !== "manual").slice(0, compareItems.length ? 5 : 4)} usingSelection={compareItems.length > 0} />}
+      {views.apiFields && <ApiFields items={items.filter((i) => i.work._sourcecheck.origin !== "manual")} />}
+      {!views.timeline && !views.apiFields && !views.exports && !views.testRuns && (
         <p className="text-muted-foreground py-10 text-center text-sm">No advanced views enabled.</p>
       )}
     </div>

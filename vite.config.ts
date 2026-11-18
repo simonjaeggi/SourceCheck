@@ -9,8 +9,9 @@ import { viteSingleFile } from "vite-plugin-singlefile"
  * the Vercel functions in api/ use. Reads OPENROUTER_API_KEY etc. from .env.local.
  */
 const DEV_ROUTES = {
-  "/api/assess": ["/server/assess.ts", "handleAssess"],
-  "/api/lookup": ["/server/lookup.ts", "handleLookup"],
+  "/api/assess": ["/server/assess.ts", "handleAssess", "POST"],
+  "/api/lookup": ["/server/lookup.ts", "handleLookup", "POST"],
+  "/api/models": ["/server/models.ts", "handleModels", "GET"],
 } as const
 
 function devApi(): Plugin {
@@ -19,7 +20,7 @@ function devApi(): Plugin {
     apply: "serve",
     configureServer(server) {
       Object.assign(process.env, loadEnv("development", process.cwd(), ""))
-      for (const [route, [file, handler]] of Object.entries(DEV_ROUTES))
+      for (const [route, [file, handler, method]] of Object.entries(DEV_ROUTES))
       server.middlewares.use(route, async (req, res) => {
         const chunks: Buffer[] = []
         for await (const c of req) chunks.push(c as Buffer)
@@ -28,7 +29,7 @@ function devApi(): Plugin {
           headers: req.headers as Record<string, string>,
           body: req.method === "GET" || req.method === "HEAD" ? undefined : Buffer.concat(chunks),
         })
-        if (req.method !== "POST") {
+        if (req.method !== method) {
           res.statusCode = 405
           res.end()
           return

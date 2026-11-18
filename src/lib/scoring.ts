@@ -49,6 +49,7 @@ export function peerReviewStatus(work: OpenAlexWork): boolean | null {
 }
 
 export function scoreWork(work: OpenAlexWork, assessment: AssessmentResponse | null = null, currentYear = new Date().getFullYear()): ScoredWork {
+  if (work._sourcecheck.origin === "manual") return scoreManual(work, assessment)
   const src = work.primary_location.source
   const pct = work.citation_normalized_percentile?.value
   const peerReviewed = peerReviewStatus(work)
@@ -77,6 +78,18 @@ export function scoreWork(work: OpenAlexWork, assessment: AssessmentResponse | n
     retrievability: work.doi ? "DOI resolves" : src ? "no DOI, venue identifiable" : "no DOI, venue unknown",
   }
 
+  // Your details replace OpenAlex's fact where you filled them in.
+  const d = work._sourcecheck.details
+  if (d) {
+    if (d.year) facts.currency = `${d.year} (your details)`
+    if (d.authors) facts.authority = `${d.authors} (your details)`
+    if (d.venue || d.peer_review || d.venue_metric) facts.venue = [d.venue ?? facts.venue, d.peer_review && `peer review: ${d.peer_review}`, d.venue_metric].filter(Boolean).join(", ") + " (your details)"
+    if (d.citations) facts.reception = `${d.citations} (your details)`
+    if (d.abstract) facts.evidence = facts.relevance = "your abstract"
+    if (d.use) facts.relevance = `your note on how it is used, ${facts.relevance}`
+    if (d.link) facts.retrievability = `link: ${d.link} (your details)`
+  }
+
   const flags: ScoredWork["flags"] = []
   if (work.is_retracted) flags.push({ label: "Retracted", tone: "bad" })
   if (peerReviewed === true) flags.push({ label: "Peer reviewed", tone: "good" })
@@ -86,12 +99,45 @@ export function scoreWork(work: OpenAlexWork, assessment: AssessmentResponse | n
   if (work.open_access.is_oa) flags.push({ label: "Open access", tone: "neutral" })
   if (!work.doi) flags.push({ label: "No DOI", tone: "warn" })
   if (work._sourcecheck.match?.confidence === "uncertain") flags.push({ label: "Check match", tone: "warn" })
-  if (work._sourcecheck.match?.confidence === "confirmed") flags.push({ label: "Match confirmed", tone: "neutral" })
+  if (work._sourcecheck.match?.confidence === "confirmed") flags.push({ label: work._sourcecheck.match.method === "doi" ? "DOI added by you" : "Match confirmed", tone: "neutral" })
+  if (work._sourcecheck.details) flags.push({ label: "Details edited", tone: "neutral" })
 
   return { work, assessment, metrics, overall, signal, facts, peerReviewed, flags }
 }
 
+function ratingsOf(assessment: AssessmentResponse | null) {
+  const metrics = Object.fromEntries(
+    METRICS.map((m) => {
+      const r = assessment?.criteria[m.key].rating
+      return [m.key, r && r !== "no_rating" ? RATING_SCORE[r] : null]
+    })
+  ) as Record<MetricKey, number | null>
+  const rated = Object.values(metrics).filter((v): v is number => v != null)
+  const overall = assessment && rated.length ? r1(rated.reduce((s, v) => s + v, 0) / rated.length) : null
+  return { metrics, overall, signal: assessment ? VERDICT_SIGNAL[assessment.overall] : null }
+}
+
+/** A source you described yourself: the facts are your details, nothing from OpenAlex. */
+function scoreManual(work: OpenAlexWork, assessment: AssessmentResponse | null): ScoredWork {
+  const d = work._sourcecheck.details ?? {}
+  const given = (v: string | undefined, none = "not given") => v || none
+  const facts: Record<MetricKey, string> = {
+    relevance: [d.use && "your note on how it is used", d.abstract ? "your abstract" : "no abstract; title only"].filter(Boolean).join(", "),
+    currency: given(d.year, "no year given"),
+    authority: given(d.authors, "no authors given"),
+    venue: [given(d.venue, "no venue given"), d.peer_review && `peer review: ${d.peer_review}`, d.venue_metric].filter(Boolean).join(", "),
+    evidence: d.abstract ? "your abstract" : "no abstract",
+    objectivity: given(d.venue, "no publisher given"),
+    reception: given(d.citations, "not indexed in OpenAlex"),
+    retrievability: d.link ? `link: ${d.link}` : "no link given",
+  }
+  const flags: ScoredWork["flags"] = [{ label: "Added by you", tone: "neutral" }]
+  if (!d.link) flags.push({ label: "No link", tone: "warn" })
+  return { work, assessment, ...ratingsOf(assessment), facts, peerReviewed: null, flags }
+}
+
 export function formatAuthors(work: OpenAlexWork, max = 3) {
+  if (work._sourcecheck.origin === "manual") return work._sourcecheck.details?.authors || "Authors not given"
   const names = work.authorships.map((x) => x.author.display_name)
   return names.length > max ? `${names.slice(0, max).join(", ")} et al.` : names.join(", ")
 }

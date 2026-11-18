@@ -1,3 +1,4 @@
+import type { Example } from "@/data/example"
 import { Eraser, GitCompareArrows, ListChecks, ScanSearch, SlidersHorizontal, Sparkles, Trash2, CircleDot } from "lucide-react"
 import {
   CommandDialog,
@@ -21,7 +22,8 @@ interface Props {
   hasSelection: boolean
   onOpenSource: (item: ScoredWork) => void
   onAnalyze: () => void
-  onLoadExample: () => void
+  onLoadExample: (ex: Example) => void
+  examples: Example[]
   onClear: () => void
   onTab: (tab: string) => void
   onFilter: (f: Signal | "all") => void
@@ -56,7 +58,7 @@ export function CommandMenu(p: Props) {
                 <div className="min-w-0 flex-1">
                   <p className="truncate">{r.work.display_name}</p>
                   <p className="text-muted-foreground truncate text-xs">
-                    {formatAuthors(r.work, 2)} ({r.work.publication_year})
+                    {formatAuthors(r.work, 2)}{r.work.publication_year ? ` (${r.work.publication_year})` : ""}
                   </p>
                 </div>
                 <span className="text-muted-foreground text-xs tabular-nums">{r.overall?.toFixed(1) ?? "–"}</span>
@@ -70,9 +72,11 @@ export function CommandMenu(p: Props) {
           <CommandItem disabled={p.loading || !p.canAnalyze} onSelect={run(p.onAnalyze)}>
             <ScanSearch />Analyze sources<CommandShortcut>⌘↵</CommandShortcut>
           </CommandItem>
-          <CommandItem onSelect={run(p.onLoadExample)}>
-            <Sparkles />Load example input
-          </CommandItem>
+          {p.examples.map((ex) => (
+            <CommandItem key={ex.id} onSelect={run(() => p.onLoadExample(ex))}>
+              <Sparkles />Load example: {ex.label}
+            </CommandItem>
+          ))}
           <CommandItem onSelect={run(p.onClear)}>
             <Eraser />Clear input
           </CommandItem>

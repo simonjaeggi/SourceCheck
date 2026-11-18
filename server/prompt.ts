@@ -4,8 +4,10 @@
  * do not tune it on the gold-standard cases before the first comparison.
  */
 import type { AssessmentRequest } from "../src/lib/assessment.js"
+import { DEFAULT_PROMPT, type PromptId } from "../src/lib/prompts.js"
 
-export const PROMPT_VERSION = "v2.1"
+/** The default prompt's id; reported as prompt_version with every assessment. */
+export const PROMPT_VERSION: PromptId = DEFAULT_PROMPT
 
 /** Static, so it can be prompt-cached. Nothing request-specific goes in here. */
 export const SYSTEM_PROMPT = `You assess one source from a student's thesis, the way an experienced thesis supervisor would.
@@ -118,3 +120,12 @@ ${issues}
 
 Return the complete corrected JSON object, and nothing else. Keep your assessment unless a problem forces a change.`
 }
+
+/**
+ * System prompt per selectable id (see src/lib/prompts.ts). Server-side only: the client
+ * picks an id, and an unknown id is rejected before any model call.
+ */
+export const PROMPT_TEXTS: Record<PromptId, string> = {
+  "v2.1": SYSTEM_PROMPT,
+}
+

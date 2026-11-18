@@ -1,5 +1,5 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Globe, Upload, FileText, Loader2, ScanSearch, Sparkles, ListChecks, GitCompareArrows, SlidersHorizontal, Info, Search, X, ArrowRight } from "lucide-react"
+import { Globe, PencilLine, Upload, FileText, Loader2, ScanSearch, Sparkles, ListChecks, GitCompareArrows, SlidersHorizontal, Info, Search, X, ArrowRight } from "lucide-react"
 import { AnimatePresence, MotionConfig, motion } from "motion/react"
 import NumberFlow from "@number-flow/react"
 import { toast } from "sonner"
@@ -16,9 +16,16 @@ import { BorderBeam } from "@/components/ui/border-beam"
 import { AnimatedShinyText } from "@/components/ui/animated-shiny-text"
 import { Spotlight } from "@/components/ui/spotlight"
 import { cn } from "@/lib/utils"
-import { SAMPLE_CONTEXT, SAMPLE_REFERENCES } from "@/data/example"
+import { EXAMPLES, type Example } from "@/data/example"
 import type { OpenAlexWork } from "@/data/types"
-import { contextProblem, requestAssessment, type AssessState } from "@/lib/assessClient"
+import { contextProblem, fetchModels, requestAssessment, type AssessState, type ModelOption } from "@/lib/assessClient"
+import { useTestRuns } from "@/lib/useTestRuns"
+import { ModelPicker } from "@/components/app/ModelPicker"
+import { PromptPicker } from "@/components/app/PromptPicker"
+import { DEFAULT_PROMPT, PROMPTS } from "@/lib/prompts"
+import { DetailsDialog, type DetailsTarget } from "@/components/app/DetailsDialog"
+import { manualWork, toUnmatched } from "@/lib/details"
+import type { SourceDetails } from "@/data/types"
 import { looksLikeBib, prepareInput, type InputMode } from "@/lib/referenceInput"
 import { ReferenceFormatHint } from "@/components/app/ReferenceFormatHint"
 import { scoreWork, type ScoredWork, type Signal } from "@/lib/scoring"
@@ -61,7 +68,25 @@ export default function App() {
   const [filter, setFilter] = useState<Signal | "all" | "pending">("all")
   /** web sources are listed (not assessed); this hides them */
   const [showWeb, setShowWeb] = useState(true)
-  const [views, setViews] = useState<AdvancedViews>({ timeline: true, apiFields: false })
+  const [views, setViews] = useState<AdvancedViews>({ exports: true, testRuns: true, timeline: false, apiFields: false })
+  /** "" = the server's default models; otherwise one free model, remembered in this browser */
+  const [model, setModelState] = useState<string>(() => { try { return localStorage.getItem("sourcecheck-model") ?? "" } catch { return "" } })
+  const setModel = (id: string) => { setModelState(id); try { localStorage.setItem("sourcecheck-model", id) } catch { /* private mode */ } }
+  /** prompt id, remembered in this browser; unknown ids (a removed prompt) fall back to the default */
+  const [prompt, setPromptState] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem("sourcecheck-prompt")
+      return saved && PROMPTS.some((p) => p.id === saved) ? saved : DEFAULT_PROMPT
+    } catch {
+      return DEFAULT_PROMPT
+    }
+  })
+  const setPrompt = (id: string) => { setPromptState(id); try { localStorage.setItem("sourcecheck-prompt", id) } catch { /* private mode */ } }
+  const [modelList, setModelList] = useState<{ models: ModelOption[]; default: string[] }>({ models: [], default: [] })
+  useEffect(() => { fetchModels().then((m) => m && setModelList(m)) }, [])
+  const testRuns = useTestRuns()
+  /** the source whose "Add details" dialog is open */
+  const [detailsTarget, setDetailsTarget] = useState<DetailsTarget | null>(null)
   const [cmdOpen, setCmdOpen] = useState(false)
   // Lazy overlays stay mounted after first use so their close animations still run.
   const [sheetUsed, setSheetUsed] = useState(false)
@@ -80,7 +105,7 @@ export default function App() {
     if (!work || contextProblem(context) || assess[id]?.status === "loading") return
     const gen = generation.current
     setAssess((m) => ({ ...m, [id]: { status: "loading" } }))
-    const result = await requestAssessment(work, context)
+    const result = await requestAssessment(work, context, model || undefined, prompt)
     if (gen === generation.current) setAssess((m) => ({ ...m, [id]: result }))
     return result
   }
@@ -204,11 +229,66 @@ export default function App() {
     toast.success("Match confirmed", { description: work.display_name })
   }
 
-  function loadExample() {
-    setReferences(SAMPLE_REFERENCES)
+  /** Changed facts make an earlier assessment stale: drop it, so the source is assessed again. */
+  function forgetAssessment(id: string) {
+    setAssess((m) => {
+      if (!(id in m)) return m
+      const { [id]: _, ...rest } = m
+      return rest
+    })
+  }
+
+  function saveDetails(target: DetailsTarget, details: SourceDetails) {
+    if (target.kind === "unmatched") {
+      const work = manualWork(target.source, details)
+      setWorks((ws) => [...(ws ?? []).filter((w) => w.id !== work.id), work])
+      setUnmatched((us) => us.filter((u) => u.index !== target.source.index))
+      toast.success("Source added", { description: "It is in the list now and can be assessed." })
+    } else {
+      const w = target.work
+      const next = w._sourcecheck.origin === "manual" ? manualWork(toUnmatched(w), details) : { ...w, _sourcecheck: { ...w._sourcecheck, details } }
+      setWorks((ws) => ws?.map((x) => (x.id === w.id ? next : x)) ?? ws)
+      if (assess[w.id]) toast("Details saved", { description: "The earlier assessment was cleared, because the AI now gets different facts." })
+      else toast.success("Details saved")
+      forgetAssessment(w.id)
+    }
+    setDetailsTarget(null)
+  }
+
+  function removeDetails(target: DetailsTarget) {
+    if (target.kind === "work") {
+      const w = target.work
+      if (w._sourcecheck.origin === "manual") {
+        setWorks((ws) => ws?.filter((x) => x.id !== w.id) ?? ws)
+        setUnmatched((us) => [...us, toUnmatched(w)].sort((a, b) => a.index - b.index))
+        setSelected((s) => s.filter((id) => id !== w.id))
+        if (openId === w.id) setOpenId(null)
+      } else {
+        const { details: _, ...rest } = w._sourcecheck
+        setWorks((ws) => ws?.map((x) => (x.id === w.id ? { ...w, _sourcecheck: rest } : x)) ?? ws)
+      }
+      forgetAssessment(w.id)
+      toast("Details removed")
+    }
+    setDetailsTarget(null)
+  }
+
+  /** A DOI entered for an unmatched reference was found in OpenAlex. */
+  function addFromDoi(u: Unmatched, found: OpenAlexWork) {
+    const work: OpenAlexWork = { ...found, _sourcecheck: { ...found._sourcecheck, raw_reference: u.reference, input_index: u.index, match: { method: "doi", confidence: "confirmed" } } }
+    const duplicate = works?.some((w) => w.id === work.id)
+    if (!duplicate) setWorks((ws) => [...(ws ?? []), work])
+    setUnmatched((us) => us.filter((x) => x.index !== u.index))
+    setDetailsTarget(null)
+    if (duplicate) toast("Already in the list", { description: `Another reference already points to ${work.display_name}.` })
+    else toast.success("Found in OpenAlex", { description: work.display_name })
+  }
+
+  function loadExample(ex: Example = EXAMPLES[0]) {
+    setReferences(ex.references)
     setInputMode("text")
-    setContext(SAMPLE_CONTEXT)
-    toast("Example input loaded")
+    setContext(ex.context)
+    toast(`${ex.label} loaded`, { description: ex.description })
   }
 
   function clearInput() {
@@ -397,9 +477,7 @@ export default function App() {
                   {!loading && <Kbd className="bg-primary-foreground/15 text-primary-foreground/80 absolute right-3 hidden sm:inline-flex">⌘↵</Kbd>}
                 </Button>
                 <div className="flex gap-2">
-                  <Button variant="outline" size="sm" className="flex-1" onClick={loadExample}>
-                    <Sparkles />Load example
-                  </Button>
+                  <ExamplePicker onPick={loadExample} className="flex-1" />
                   <Button variant="ghost" size="sm" className="flex-1" onClick={clearInput}>
                     Clear
                   </Button>
@@ -473,6 +551,12 @@ export default function App() {
                           )}
                           {assessProblem && <p className="text-muted-foreground text-xs">{assessProblem}</p>}
                         </div>
+                        {/* own row under the text, so the explanation keeps its width */}
+                        <div className="order-last flex w-full flex-wrap items-center gap-2 pl-7">
+                          <span className="text-muted-foreground text-xs">Assess with</span>
+                          <ModelPicker value={model} onChange={setModel} models={modelList.models} defaults={modelList.default} disabled={!!batch} className="max-w-64" />
+                          <PromptPicker value={prompt} onChange={setPrompt} disabled={!!batch} className="max-w-52" />
+                        </div>
                         {counts.pending > 0 && (
                           <Button onClick={assessAll} disabled={!!batch || !!assessProblem}>
                             {batch ? <Loader2 className="animate-spin" /> : <Sparkles />}
@@ -524,8 +608,9 @@ export default function App() {
                       assess={assess}
                       onAssess={runAssess}
                       assessProblem={assessProblem}
+                      onAddDetails={(source) => setDetailsTarget({ kind: "unmatched", source })}
                     />
-                    {otherUnmatched.length > 0 && <UnmatchedList items={otherUnmatched} onConfirm={confirmMatch} />}
+                    {otherUnmatched.length > 0 && <UnmatchedList items={otherUnmatched} onConfirm={confirmMatch} onAddDetails={(source) => setDetailsTarget({ kind: "unmatched", source })} />}
                     <p className="text-muted-foreground text-xs">Click a source for details. Tick boxes to compare up to {MAX_COMPARE}.</p>
 
                     {/* Floating compare bar */}
@@ -560,7 +645,25 @@ export default function App() {
 
                   <TabsContent value="advanced">
                     <Suspense fallback={<ViewFallback />}>
-                      <AdvancedView items={results} compareItems={compareItems} views={views} onChange={setViews} />
+                      <AdvancedView
+                        items={results}
+                        compareItems={compareItems}
+                        views={views}
+                        onChange={setViews}
+                        research={{
+                          works: works ?? [],
+                          selectedWorks: compareItems.map((c) => c.work),
+                          assess,
+                          context,
+                          contextProblem: assessProblem,
+                          web: webSources,
+                          models: modelList.models,
+                          defaults: modelList.default,
+                          model,
+                          prompt,
+                          runner: testRuns,
+                        }}
+                      />
                     </Suspense>
                   </TabsContent>
                 </>
@@ -578,8 +681,10 @@ export default function App() {
               assessState={openId ? assess[openId] : undefined}
               problem={assessProblem}
               onAssess={runAssess}
+              onEditDetails={(it) => setDetailsTarget({ kind: "work", work: it.work })}
             />
           )}
+          <DetailsDialog target={detailsTarget} onClose={() => setDetailsTarget(null)} onSave={saveDetails} onRemove={removeDetails} onDoiFound={addFromDoi} />
           {cmdUsed && (
         <CommandMenu
           open={cmdOpen}
@@ -590,6 +695,7 @@ export default function App() {
           onOpenSource={(r) => setOpenId(r.work.id)}
           onAnalyze={analyze}
           onLoadExample={loadExample}
+          examples={EXAMPLES}
           onClear={clearInput}
           onTab={setTab}
           onFilter={setFilter}
@@ -646,7 +752,7 @@ function Chip({ active, onClick, children, group }: { active: boolean; onClick: 
   )
 }
 
-function EmptyState({ onExample }: { onExample: () => void }) {
+function EmptyState({ onExample }: { onExample: (ex: Example) => void }) {
   return (
     <div className="bg-card flex flex-col items-center gap-3 rounded-xl border border-dashed px-6 py-16 text-center">
       <ScanSearch className="text-muted-foreground size-8" />
@@ -656,10 +762,40 @@ function EmptyState({ onExample }: { onExample: () => void }) {
           Paste your reference list and your thesis topic and research question on the left, then click "Analyze sources". Each reference is looked up in OpenAlex, and you can then have the AI assess it.
         </p>
       </div>
-      <Button variant="outline" size="sm" onClick={onExample}>
-        <Sparkles />Load example
-      </Button>
+      <div className="flex flex-wrap justify-center gap-2">
+        {EXAMPLES.map((ex) => (
+          <Button key={ex.id} variant="outline" size="sm" onClick={() => onExample(ex)} title={ex.description}>
+            <Sparkles />{ex.label}
+          </Button>
+        ))}
+      </div>
     </div>
+  )
+}
+
+/** "Load example" as a native select: the gold-standard theses and the demo list. */
+function ExamplePicker({ onPick, className }: { onPick: (ex: Example) => void; className?: string }) {
+  return (
+    <label className={cn("bg-background hover:bg-muted focus-within:ring-ring/50 relative inline-flex h-8 cursor-pointer items-center justify-center gap-1.5 rounded-md border px-3 text-sm font-medium shadow-xs focus-within:ring-[3px]", className)}>
+      <Sparkles className="size-4" />
+      Load example
+      <select
+        aria-label="Load example"
+        value=""
+        onChange={(e) => {
+          const ex = EXAMPLES.find((x) => x.id === e.target.value)
+          if (ex) onPick(ex)
+        }}
+        className="absolute inset-0 cursor-pointer opacity-0"
+      >
+        <option value="" disabled>Load example…</option>
+        {EXAMPLES.map((ex) => (
+          <option key={ex.id} value={ex.id}>
+            {ex.label} ({ex.description})
+          </option>
+        ))}
+      </select>
+    </label>
   )
 }
 
@@ -671,12 +807,12 @@ const UNMATCHED_GROUPS: { title: string; note: string; reasons: Unmatched["reaso
   },
   {
     title: "Not found",
-    note: "No reliable OpenAlex record. Check these by hand; a scholarly source that no index knows is a warning sign in itself.",
+    note: "No reliable OpenAlex record. Check these by hand; a scholarly source that no index knows is a warning sign in itself. Add details (or a DOI) to assess one.",
     reasons: ["not_found", "no_confident_match", "openalex_rate_limited", "openalex_error"],
   },
 ]
 
-function UnmatchedList({ items, onConfirm }: { items: Unmatched[]; onConfirm: (u: Unmatched) => void }) {
+function UnmatchedList({ items, onConfirm, onAddDetails }: { items: Unmatched[]; onConfirm: (u: Unmatched) => void; onAddDetails: (u: Unmatched) => void }) {
   return (
     <Card className="gap-4 border-dashed px-4 py-3 shadow-none">
       {UNMATCHED_GROUPS.map((g) => {
@@ -693,7 +829,12 @@ function UnmatchedList({ items, onConfirm }: { items: Unmatched[]; onConfirm: (u
             <ul className="flex flex-col gap-2 text-xs">
               {group.map((u, i) => (
                 <li key={i} className="flex flex-col gap-1">
-                  <span className="font-mono break-words">{u.reference}</span>
+                  <div className="flex items-start gap-2">
+                    <span className="min-w-0 flex-1 font-mono break-words">{u.reference}</span>
+                    <Button size="sm" variant="ghost" className="-mt-1 h-7 shrink-0 text-xs" onClick={() => onAddDetails(u)} title="Enter its details (or a DOI) so it can be assessed">
+                      <PencilLine />Add details
+                    </Button>
+                  </div>
                   {u.candidate ? (
                     <div className="bg-muted flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md px-2.5 py-2">
                       <span className="min-w-0 flex-1">
