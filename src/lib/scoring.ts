@@ -86,6 +86,7 @@ export function scoreWork(work: OpenAlexWork, assessment: AssessmentResponse | n
   if (work.open_access.is_oa) flags.push({ label: "Open access", tone: "neutral" })
   if (!work.doi) flags.push({ label: "No DOI", tone: "warn" })
   if (work._sourcecheck.match?.confidence === "uncertain") flags.push({ label: "Check match", tone: "warn" })
+  if (work._sourcecheck.match?.confidence === "confirmed") flags.push({ label: "Match confirmed", tone: "neutral" })
 
   return { work, assessment, metrics, overall, signal, facts, peerReviewed, flags }
 }

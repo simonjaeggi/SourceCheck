@@ -107,6 +107,12 @@ function CopyButton({ text, label }: { text: string; label: string }) {
   )
 }
 
+const SIGNAL_LABEL: Record<string, string> = { author: "an author", year: "the year", venue: "the venue" }
+function signalText(signals: string[] = []) {
+  const parts = signals.map((x) => SIGNAL_LABEL[x] ?? x)
+  return parts.length ? (parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}` : parts[0]) : "other details"
+}
+
 function MatchNote({ item }: { item: ScoredWork }) {
   const w = item.work
   const m = w._sourcecheck.match!
@@ -117,8 +123,10 @@ function MatchNote({ item }: { item: ScoredWork }) {
         {m.method === "doi"
           ? "Found in OpenAlex by the DOI in your reference."
           : m.confidence === "likely"
-            ? "Found in OpenAlex by title search; the title matches your reference."
-            : "Found by title search, but the match is uncertain. Check that this is the paper you cite."}
+            ? `Found in OpenAlex by title search; the title and ${signalText(m.signals)} match your reference.`
+            : m.confidence === "confirmed"
+              ? `Found by title search and confirmed by you${m.signals?.length ? `; ${signalText(m.signals)} also match` : ""}.`
+              : "Found by title search, but the match is uncertain. Check that this is the paper you cite."}
       </p>
       {authors.length > 0 && (
         <p className="text-muted-foreground text-xs">

@@ -1,5 +1,5 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { FileText, Loader2, ScanSearch, Sparkles, ListChecks, GitCompareArrows, SlidersHorizontal, Info, Search, X, ArrowRight } from "lucide-react"
+import { Globe, Upload, FileText, Loader2, ScanSearch, Sparkles, ListChecks, GitCompareArrows, SlidersHorizontal, Info, Search, X, ArrowRight } from "lucide-react"
 import { AnimatePresence, MotionConfig, motion } from "motion/react"
 import NumberFlow from "@number-flow/react"
 import { toast } from "sonner"
@@ -19,9 +19,11 @@ import { cn } from "@/lib/utils"
 import { SAMPLE_CONTEXT, SAMPLE_REFERENCES } from "@/data/example"
 import type { OpenAlexWork } from "@/data/types"
 import { contextProblem, requestAssessment, type AssessState } from "@/lib/assessClient"
+import { looksLikeBib, prepareInput, type InputMode } from "@/lib/referenceInput"
+import { ReferenceFormatHint } from "@/components/app/ReferenceFormatHint"
 import { scoreWork, type ScoredWork, type Signal } from "@/lib/scoring"
 import { LOOKUP_ERROR_MESSAGES, LOOKUP_LIMITS, UNMATCHED_LABELS, type LookupResult, type Unmatched } from "@/lib/lookup"
-import { SourceList } from "@/components/app/SourceList"
+import { SourceList, type Row } from "@/components/app/SourceList"
 import type { AdvancedViews } from "@/components/app/AdvancedView"
 import { TrafficLight } from "@/components/app/TrafficLight"
 import { ThemePicker } from "@/components/app/ThemePicker"
@@ -41,6 +43,7 @@ type SortKey = "score" | "year" | "citations" | "input"
 
 export default function App() {
   const [references, setReferences] = useState("")
+  const [inputMode, setInputMode] = useState<InputMode>("text")
   const [context, setContext] = useState("")
   const [loading, setLoading] = useState(false)
   /** null until the first successful lookup */
@@ -56,6 +59,8 @@ export default function App() {
   const [tab, setTab] = useState("sources")
   const [sort, setSort] = useState<SortKey>("score")
   const [filter, setFilter] = useState<Signal | "all" | "pending">("all")
+  /** web sources are listed (not assessed); this hides them */
+  const [showWeb, setShowWeb] = useState(true)
   const [views, setViews] = useState<AdvancedViews>({ timeline: true, apiFields: false })
   const [cmdOpen, setCmdOpen] = useState(false)
   // Lazy overlays stay mounted after first use so their close animations still run.
@@ -107,17 +112,46 @@ export default function App() {
     else setTimeout(prefetch, 2000)
   }, [])
 
-  const refLines = references.split("\n").map((l) => l.trim()).filter(Boolean)
+  const prepared = useMemo(() => prepareInput(references, inputMode), [references, inputMode])
+  // BibTeX is turned into reference lines here, so long entries are cut to the lookup limit.
+  const refLines = inputMode === "bib" ? prepared.lines.map((l) => l.slice(0, LOOKUP_LIMITS.reference)) : prepared.lines
   const refCount = refLines.length
+  const bibErrors = prepared.errors.filter((e) => !e.warning)
+  const formatProblem = bibErrors.length > 0 || prepared.suspicious.length > 0
+
+  /** Typing or pasting BibTeX into the text field switches to BibTeX once. */
+  function onReferencesChange(text: string) {
+    setReferences(text)
+    if (inputMode === "text" && looksLikeBib(text)) {
+      setInputMode("bib")
+      toast("Switched to BibTeX", { description: "Your input starts with an @entry, so it is read as BibTeX." })
+    }
+  }
+
+  async function onFile(file: File | undefined) {
+    if (!file) return
+    if (file.size > 1_000_000) {
+      toast.error("That file is too large", { description: "Upload a .bib or .txt file under 1 MB." })
+      return
+    }
+    const text = await file.text()
+    setReferences(text)
+    setInputMode(/\.(bib|bibtex)$/i.test(file.name) || looksLikeBib(text) ? "bib" : "text")
+    toast(`Loaded ${file.name}`)
+  }
 
   async function analyze() {
+    if (bibErrors.length) {
+      toast.error("Fix the BibTeX errors first", { description: `${bibErrors.length} problem${bibErrors.length === 1 ? "" : "s"}, listed under the references.` })
+      return
+    }
     if (refCount > LOOKUP_LIMITS.references) {
       toast.error(`At most ${LOOKUP_LIMITS.references} references per check`, { description: `You pasted ${refCount}. Split the list and check it in parts.` })
       return
     }
     const tooLong = refLines.findIndex((l) => l.length > LOOKUP_LIMITS.reference)
     if (tooLong >= 0) {
-      toast.error(`Reference ${tooLong + 1} is longer than ${LOOKUP_LIMITS.reference} characters`, { description: "Put one reference per line." })
+      toast.error(`Reference ${tooLong + 1} is longer than ${LOOKUP_LIMITS.reference} characters`, { description: "Put one reference per line, or use BibTeX." })
       return
     }
     const previous = works
@@ -143,11 +177,16 @@ export default function App() {
     setWorks(body.works)
     setUnmatched(body.unmatched)
     setTab("sources")
-    const throttled = body.unmatched.filter((u) => u.reason === "openalex_rate_limited" || u.reason === "openalex_error").length
-    const missing = body.unmatched.length - throttled
+    const count = (r: Unmatched["reason"]) => body.unmatched.filter((u) => u.reason === r).length
+    const throttled = count("openalex_rate_limited") + count("openalex_error")
+    const web = count("web_source")
+    const possible = count("possible_match")
+    const missing = body.unmatched.length - throttled - web - possible
     const notify = throttled ? toast.warning : toast.success
     notify(`${body.works.length} of ${refCount} sources found in OpenAlex`, {
       description: [
+        web ? `${web} web source${web === 1 ? "" : "s"} listed, not assessed.` : "",
+        possible ? `${possible} possible match${possible === 1 ? "" : "es"} to check.` : "",
         missing ? `${missing} not found.` : "",
         throttled ? `${throttled} could not be looked up because OpenAlex limited the requests; try again later.` : "",
         "Assess them with AI to get ratings.",
@@ -155,8 +194,19 @@ export default function App() {
     })
   }
 
+  /** The user accepts a possible match: it joins the sources, marked as confirmed. */
+  function confirmMatch(u: Unmatched) {
+    const c = u.candidate
+    if (!c) return
+    const work: OpenAlexWork = { ...c, _sourcecheck: { ...c._sourcecheck, input_index: u.index, match: { ...c._sourcecheck.match!, confidence: "confirmed" } } }
+    setWorks((ws) => (ws?.some((w) => w.id === work.id) ? ws : [...(ws ?? []), work]))
+    setUnmatched((us) => us.filter((x) => x !== u))
+    toast.success("Match confirmed", { description: work.display_name })
+  }
+
   function loadExample() {
     setReferences(SAMPLE_REFERENCES)
+    setInputMode("text")
     setContext(SAMPLE_CONTEXT)
     toast("Example input loaded")
   }
@@ -178,8 +228,22 @@ export default function App() {
     if (sort === "score") list.sort((a, b) => (b.overall ?? -1) - (a.overall ?? -1))
     if (sort === "year") list.sort((a, b) => b.work.publication_year - a.work.publication_year)
     if (sort === "citations") list.sort((a, b) => b.work.cited_by_count - a.work.cited_by_count)
+    if (sort === "input") list.sort((a, b) => (a.work._sourcecheck.input_index ?? 1e9) - (b.work._sourcecheck.input_index ?? 1e9))
     return list
   }, [results, sort, filter])
+
+  const webSources = useMemo(() => unmatched.filter((u) => u.reason === "web_source"), [unmatched])
+  const otherUnmatched = useMemo(() => unmatched.filter((u) => u.reason !== "web_source"), [unmatched])
+
+  /** Works plus web sources: in "Input order" they sit where they were pasted, otherwise after the works. */
+  const rows = useMemo<Row[]>(() => {
+    const workRows: Row[] = sorted.map((item) => ({ kind: "work", item }))
+    if (!showWeb || filter !== "all" || !webSources.length) return workRows
+    const webRows: Row[] = webSources.map((source) => ({ kind: "web", source }))
+    if (sort !== "input") return [...workRows, ...webRows]
+    const pos = (r: Row) => (r.kind === "web" ? r.source.index : r.item.work._sourcecheck.input_index ?? 1e9)
+    return [...workRows, ...webRows].sort((a, b) => pos(a) - pos(b))
+  }, [sorted, webSources, showWeb, filter, sort])
 
   const compareItems = useMemo(
     () => selected.map((id) => results?.find((r) => r.work.id === id)).filter(Boolean) as ScoredWork[],
@@ -263,18 +327,58 @@ export default function App() {
               </CardHeader>
               <CardContent className="flex flex-col gap-4">
                 <div className="flex flex-col gap-2">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
                     <Label htmlFor="refs">References</Label>
-                    <span className="text-muted-foreground text-xs tabular-nums"><NumberFlow locales="en-US" value={refCount} /> detected</span>
+                    <div role="radiogroup" aria-label="Reference format" className="bg-muted inline-flex rounded-md p-0.5 text-xs">
+                      {(["text", "bib"] as const).map((m) => (
+                        <button
+                          key={m}
+                          type="button"
+                          role="radio"
+                          aria-checked={inputMode === m}
+                          onClick={() => setInputMode(m)}
+                          className={cn("rounded px-2 py-0.5 font-medium transition-colors", inputMode === m ? "bg-background text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}
+                        >
+                          {m === "text" ? "Text" : "BibTeX"}
+                        </button>
+                      ))}
+                    </div>
+                    <span className="text-muted-foreground ml-auto text-xs tabular-nums"><NumberFlow locales="en-US" value={refCount} /> {inputMode === "bib" ? (refCount === 1 ? "entry" : "entries") : "detected"}</span>
                   </div>
                   <Textarea
                     id="refs"
                     value={references}
-                    onChange={(e) => setReferences(e.target.value)}
+                    onChange={(e) => onReferencesChange(e.target.value)}
                     onKeyDown={submitOnModEnter}
-                    placeholder="Paste your bibliography (APA, IEEE, BibTeX, one per line)…"
+                    placeholder={inputMode === "bib" ? "Paste your .bib file (BibTeX or BibLaTeX): @article{key, author = {…}, title = {…}, …}" : "Paste your bibliography (APA, IEEE, …), one reference per line…"}
+                    aria-invalid={bibErrors.length > 0}
                     className="field-sizing-fixed h-56 resize-y font-mono text-xs leading-relaxed"
                   />
+                  <div className="flex items-center gap-2">
+                    <Button asChild variant="outline" size="sm" className="h-7 text-xs">
+                      <label className="cursor-pointer">
+                        <Upload />Upload .bib or .txt
+                        <input type="file" accept=".bib,.bibtex,.txt,text/plain,application/x-bibtex" className="sr-only" onChange={(e) => { onFile(e.target.files?.[0]); e.target.value = "" }} />
+                      </label>
+                    </Button>
+                  </div>
+                  {prepared.errors.length > 0 && (
+                    <ul role="alert" className="flex max-h-40 flex-col gap-0.5 overflow-auto rounded-md border border-red-300 bg-red-50 px-2.5 py-2 font-mono text-[11px] text-red-900 dark:border-red-900 dark:bg-red-950 dark:text-red-100">
+                      {prepared.errors.slice(0, 8).map((e, i) => (
+                        <li key={i} className={e.warning ? "opacity-70" : undefined}>
+                          {e.warning ? "Warning, line" : "Line"} {e.line}: {e.message}
+                        </li>
+                      ))}
+                      {prepared.errors.length > 8 && <li>…and {prepared.errors.length - 8} more</li>}
+                    </ul>
+                  )}
+                  {prepared.suspicious.length > 0 && (
+                    <p className="text-xs text-amber-800 dark:text-amber-200">
+                      {prepared.suspicious.length === 1 ? "Line" : "Lines"} {prepared.suspicious.slice(0, 6).join(", ")}
+                      {prepared.suspicious.length > 6 ? "…" : ""} {prepared.suspicious.length === 1 ? "does" : "do"} not look like a whole reference. Each reference must be on one line.
+                    </p>
+                  )}
+                  <ReferenceFormatHint emphasize={formatProblem} references={references} />
                 </div>
                 <div className="flex flex-col gap-2">
                   <Label htmlFor="ctx">Context <span className="text-muted-foreground font-normal">(abstract, research question)</span></Label>
@@ -287,7 +391,7 @@ export default function App() {
                     className="field-sizing-fixed h-36 resize-y text-sm"
                   />
                 </div>
-                <Button onClick={analyze} disabled={loading || !refCount} size="lg" className="group relative">
+                <Button onClick={analyze} disabled={loading || !refCount || bibErrors.length > 0} size="lg" className="group relative">
                   {loading ? <Loader2 className="animate-spin" /> : <ScanSearch className="transition-transform group-hover:scale-110" />}
                   {loading ? "Checking sources…" : "Analyze sources"}
                   {!loading && <Kbd className="bg-primary-foreground/15 text-primary-foreground/80 absolute right-3 hidden sm:inline-flex">⌘↵</Kbd>}
@@ -340,7 +444,7 @@ export default function App() {
                   <TabsContent value="sources" className="flex flex-col gap-4">
                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                       {[
-                        { label: "Sources found", value: results.length },
+                        { label: "Sources found", value: results.length, suffix: webSources.length ? ` +${webSources.length} web` : undefined },
                         { label: "Assessed by AI", value: assessedCount, suffix: `/${results.length}` },
                         { label: "Suitable", value: counts.green, signal: "green" as Signal },
                         { label: "Need attention", value: counts.amber + counts.red, signal: (counts.red ? "red" : "amber") as Signal },
@@ -386,6 +490,23 @@ export default function App() {
                           {f === "all" ? `All (${results.length})` : f === "pending" ? `Not assessed (${counts.pending})` : `${counts[f]}`}
                         </Chip>
                       ))}
+                      {webSources.length > 0 && (
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={showWeb}
+                          onClick={() => setShowWeb((v) => !v)}
+                          disabled={filter !== "all"}
+                          title={filter !== "all" ? "Web sources are not assessed, so they only show under All" : showWeb ? "Hide web sources" : "Show web sources"}
+                          className={cn(
+                            "focus-visible:ring-ring/50 inline-flex h-7 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors outline-none focus-visible:ring-[3px] disabled:opacity-50",
+                            showWeb && filter === "all" ? "border-primary text-primary bg-primary/10" : "bg-card text-muted-foreground hover:bg-muted"
+                          )}
+                        >
+                          <Globe className="size-3.5" />
+                          Web sources ({webSources.length})
+                        </button>
+                      )}
                       <span className="text-muted-foreground ml-auto">Sort by</span>
                       {(["score", "year", "citations", "input"] as const).map((s) => (
                         <Chip key={s} group="sort" active={sort === s} onClick={() => setSort(s)}>
@@ -395,7 +516,7 @@ export default function App() {
                     </div>
 
                     <SourceList
-                      items={sorted}
+                      rows={rows}
                       selected={selected}
                       onToggle={toggle}
                       onOpen={(it) => setOpenId(it.work.id)}
@@ -404,7 +525,7 @@ export default function App() {
                       onAssess={runAssess}
                       assessProblem={assessProblem}
                     />
-                    {unmatched.length > 0 && <UnmatchedList items={unmatched} />}
+                    {otherUnmatched.length > 0 && <UnmatchedList items={otherUnmatched} onConfirm={confirmMatch} />}
                     <p className="text-muted-foreground text-xs">Click a source for details. Tick boxes to compare up to {MAX_COMPARE}.</p>
 
                     {/* Floating compare bar */}
@@ -542,19 +663,68 @@ function EmptyState({ onExample }: { onExample: () => void }) {
   )
 }
 
-function UnmatchedList({ items }: { items: Unmatched[] }) {
+const UNMATCHED_GROUPS: { title: string; note: string; reasons: Unmatched["reason"][] }[] = [
+  {
+    title: "Possible matches",
+    note: "OpenAlex has a record with a similar title, but too little else agrees to use it automatically. Confirm it only if it is the work you cite.",
+    reasons: ["possible_match"],
+  },
+  {
+    title: "Not found",
+    note: "No reliable OpenAlex record. Check these by hand; a scholarly source that no index knows is a warning sign in itself.",
+    reasons: ["not_found", "no_confident_match", "openalex_rate_limited", "openalex_error"],
+  },
+]
+
+function UnmatchedList({ items, onConfirm }: { items: Unmatched[]; onConfirm: (u: Unmatched) => void }) {
   return (
-    <Card className="gap-2 border-dashed px-4 py-3 shadow-none">
-      <p className="text-sm font-medium">Not matched ({items.length})</p>
-      <p className="text-muted-foreground text-xs">These references could not be matched to an OpenAlex record. Check them by hand; a source that no index knows is a warning sign in itself.</p>
-      <ul className="flex flex-col gap-2 text-xs">
-        {items.map((u, i) => (
-          <li key={i} className="flex flex-col gap-0.5">
-            <span className="font-mono">{u.reference}</span>
-            <span className="text-muted-foreground">{UNMATCHED_LABELS[u.reason]}</span>
-          </li>
-        ))}
-      </ul>
+    <Card className="gap-4 border-dashed px-4 py-3 shadow-none">
+      {UNMATCHED_GROUPS.map((g) => {
+        const group = items.filter((u) => g.reasons.includes(u.reason))
+        if (!group.length) return null
+        return (
+          <section key={g.title} className="flex flex-col gap-2">
+            <div>
+              <p className="text-sm font-medium">
+                {g.title} ({group.length})
+              </p>
+              <p className="text-muted-foreground text-xs">{g.note}</p>
+            </div>
+            <ul className="flex flex-col gap-2 text-xs">
+              {group.map((u, i) => (
+                <li key={i} className="flex flex-col gap-1">
+                  <span className="font-mono break-words">{u.reference}</span>
+                  {u.candidate ? (
+                    <div className="bg-muted flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md px-2.5 py-2">
+                      <span className="min-w-0 flex-1">
+                        <span className="font-medium">{u.candidate.display_name}</span>
+                        <span className="text-muted-foreground">
+                          {" "}
+                          · {u.candidate.publication_year}
+                          {u.candidate.primary_location.source ? ` · ${u.candidate.primary_location.source.display_name}` : ""}
+                          {u.candidate.authorships.length ? ` · ${u.candidate.authorships.slice(0, 2).map((a) => a.author.display_name).join(", ")}${u.candidate.authorships.length > 2 ? " et al." : ""}` : ""}
+                        </span>
+                      </span>
+                      <span className="flex gap-1">
+                        {(u.candidate.doi ?? u.candidate.id) && (
+                          <Button asChild size="sm" variant="ghost" className="h-7">
+                            <a href={u.candidate.doi ?? u.candidate.id} target="_blank" rel="noreferrer">Open</a>
+                          </Button>
+                        )}
+                        <Button size="sm" variant="outline" className="h-7" onClick={() => onConfirm(u)}>
+                          Use this match
+                        </Button>
+                      </span>
+                    </div>
+                  ) : (
+                    g.reasons.length > 1 && <span className="text-muted-foreground">{UNMATCHED_LABELS[u.reason]}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )
+      })}
     </Card>
   )
 }

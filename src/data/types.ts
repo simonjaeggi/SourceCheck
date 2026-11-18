@@ -41,10 +41,18 @@ export interface OpenAlexWork {
     max_author_h_index: number | null
     /** the raw reference string as parsed from the user's paste */
     raw_reference: string
+    /** position of that reference in the pasted list (0-based), for "Input order" */
+    input_index?: number
     /** where this record came from */
     origin: "openalex"
     /** how the reference was matched to the OpenAlex record */
-    match?: { method: "doi" | "title_search"; confidence: "exact" | "likely" | "uncertain" }
+    match?: {
+      method: "doi" | "title_search"
+      /** "confirmed": an uncertain match the user accepted */
+      confidence: "exact" | "likely" | "uncertain" | "confirmed"
+      /** what agreed besides the title: "author", "year", "venue" */
+      signals?: string[]
+    }
     /** abstract rebuilt from OpenAlex abstract_inverted_index, shortened */
     abstract?: string | null
     /** per author: last known institution and h-index (OpenAlex /authors) */

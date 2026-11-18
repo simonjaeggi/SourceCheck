@@ -19,14 +19,25 @@ export const LookupRequestSchema = z.strictObject({
 })
 export type LookupRequest = z.infer<typeof LookupRequestSchema>
 
+/** What can be read from a web source's reference, for showing it in the list. */
+export type WebSource = { title: string; url: string | null; site: string | null; year: number | null; accessed: number | null }
+
 export type Unmatched = {
   reference: string
-  reason: "not_found" | "no_confident_match" | "openalex_rate_limited" | "openalex_error"
+  /** position in the pasted list (0-based), for "Input order" */
+  index: number
+  reason: "web_source" | "possible_match" | "not_found" | "no_confident_match" | "openalex_rate_limited" | "openalex_error"
+  /** for "possible_match": the record that may be this source, used only once the user confirms it */
+  candidate?: OpenAlexWork
+  /** for "web_source": title, link and site read from the reference */
+  web?: WebSource
 }
 
 export const UNMATCHED_LABELS: Record<Unmatched["reason"], string> = {
+  web_source: "Web page, software or documentation (no journal or publisher details), so it is not looked up in OpenAlex.",
+  possible_match: "OpenAlex has a similar record, but too little agrees to be sure. Check it and confirm if it is this source.",
   not_found: "No matching record in OpenAlex.",
-  no_confident_match: "OpenAlex found similar records, but none matched the title closely enough.",
+  no_confident_match: "OpenAlex found records with similar titles, but none matched closely enough.",
   openalex_rate_limited: "OpenAlex rate limit reached; try again later.",
   openalex_error: "OpenAlex could not be reached for this reference.",
 }

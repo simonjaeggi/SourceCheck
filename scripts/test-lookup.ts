@@ -3,8 +3,9 @@
  * Run: npx tsx scripts/test-lookup.ts
  */
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
 import { handleLookup } from "../server/lookup"
-import { OpenAlexError, extractDoi, extractTitle, lookupReferences, matchConfidence, pickCandidate, rebuildAbstract, type Fetcher } from "../server/openalex"
+import { OpenAlexError, extractAccessedYear, extractDoi, extractTitle, extractYear, isWebSource, lookupReferences, matchConfidence, pickCandidate, rateCandidate, rebuildAbstract, titleSimilarity, type Fetcher } from "../server/openalex"
 import { checkRateLimit } from "../server/rateLimit"
 import { scoreWork } from "../src/lib/scoring"
 
@@ -55,9 +56,78 @@ const tests: [string, () => Promise<void> | void][] = [
     assert.equal(extractTitle('[3] S. Yao et al., "ReAct: Synergizing reasoning and acting in language models," in ICLR, 2023.'), "ReAct: Synergizing reasoning and acting in language models")
   }],
   ["match confidence: exact title likely, other paper none, wrong year downgraded", () => {
-    assert.equal(matchConfidence("Why Johnny Can’t Prompt: How Non-AI Experts Try (and Fail) to Design LLM Prompts", 2023, APA), "likely")
+    const JOHNNY = "Why Johnny Can’t Prompt: How Non-AI Experts Try (and Fail) to Design LLM Prompts"
+    const byZamfirescu = { authorships: [{ author: { display_name: "J.D. Zamfirescu-Pereira" } }] }
+    assert.equal(matchConfidence(JOHNNY, 2023, APA), "likely")
     assert.equal(matchConfidence("Prompting is programming: a query language for large language models", 2023, APA), null)
-    assert.equal(matchConfidence("Why Johnny Can’t Prompt: How Non-AI Experts Try (and Fail) to Design LLM Prompts", 2015, APA), "uncertain")
+    // wrong year: with an author match one step lower, without one rejected
+    assert.equal(matchConfidence(JOHNNY, 2015, APA, byZamfirescu), "uncertain")
+    assert.equal(matchConfidence(JOHNNY, 2015, APA), null)
+  }],
+  ["title similarity is two-way and keeps non-Latin words", () => {
+    assert.equal(titleSimilarity("Cloudflare Tunnel", "Cloudflare Tunnel"), 1)
+    assert.ok(titleSimilarity("Cloudflare Tunnel 入門ガイド", "Cloudflare Tunnel") < 1)
+    assert.ok(titleSimilarity("Epidemiology and impact of dementia: chapter 2 of a clinical handbook", "The Epidemiology and Impact of Dementia") < 0.75)
+  }],
+  ["a matching title alone is not enough", () => {
+    const ref = '[9] A. Writer, "Federated learning for wearable sensors in elderly care," 2021.'
+    const title = "Federated learning for wearable sensors in elderly care"
+    // title + year → likely; title only (no year in record, different author) → uncertain
+    assert.equal(rateCandidate({ display_name: title, publication_year: 2021, type: "article" }, ref)?.confidence, "likely")
+    assert.equal(rateCandidate({ display_name: title, publication_year: null, type: "article", authorships: [{ author: { display_name: "Someone Else" } }] }, ref)?.confidence, "uncertain")
+    // a short title needs an exact title and a second signal
+    assert.equal(rateCandidate({ display_name: "Cloudflare Tunnel", publication_year: null, type: "article" }, '[4] "Cloudflare Tunnel," Cloudflare Docs.'), null)
+  }],
+  ["surnames are read in both name orders", () => {
+    const ref = "Brown, T. B., et al. (2020). Language models are few-shot learners. NeurIPS 33."
+    const cand = (name: string) => ({ display_name: "Language Models are Few-Shot Learners", publication_year: null, type: "article", authorships: [{ author: { display_name: name } }] })
+    assert.deepEqual(rateCandidate(cand("Brown, Tom B."), ref)?.signals, ["author"])
+    assert.deepEqual(rateCandidate(cand("Tom B. Brown"), ref)?.signals, ["author"])
+  }],
+  ["impossible candidates are rejected", () => {
+    const ref = '[30] A. Writer, "Federated learning for wearable sensors in elderly care," 2021. Accessed: Apr. 27, 2023.'
+    const base = { display_name: "Federated learning for wearable sensors in elderly care", publication_year: 2021, type: "article" }
+    assert.ok(rateCandidate(base, ref))
+    assert.equal(rateCandidate({ ...base, type: "paratext" }, ref), null, "table of contents and similar")
+    assert.equal(rateCandidate({ ...base, publication_year: 2024 }, ref), null, "published after it was accessed")
+    const zenodo = { ...base, primary_location: { source: { display_name: "Zenodo", type: "repository" } } }
+    assert.equal(rateCandidate(zenodo, ref), null, "repository upload without an author match")
+    assert.ok(rateCandidate({ ...zenodo, authorships: [{ author: { display_name: "Ann Writer" } }] }, ref), "repository upload with the author")
+  }],
+  ["access dates are not publication years", () => {
+    const ref = '"Firebase Cloud Messaging," Firebase, Accessed: Apr. 26, 2026. [Online]. Available: https://firebase.google.com/docs/cloud-messaging.'
+    assert.equal(extractYear(ref), null)
+    assert.equal(extractAccessedYear(ref), 2026)
+    assert.equal(extractYear("Ecoplan AG, “Alzheimer Schweiz Demenzkostenstudie 2019,” Bern, Oct. 2019. Accessed: May 1, 2024."), 2019)
+  }],
+  ["web sources: 39 of the 56 references in a real thesis, none of the scholarly ones", () => {
+    const refs = readFileSync(new URL("./fixtures/web-heavy-references.txt", import.meta.url), "utf8").split("\n").filter((l) => l.trim())
+    assert.equal(refs.length, 56)
+    const web = refs.map((r, i) => (isWebSource(r) ? i + 1 : null)).filter((n) => n !== null)
+    // Not web: DOI references, plus [17] [18] [23] [32] [55] (no link) — they are searched.
+    const searched = [10, 13, 15, 17, 18, 23, 26, 32, 34, 35, 36, 38, 39, 49, 51, 55, 56]
+    assert.deepEqual(web, Array.from({ length: 56 }, (_, i) => i + 1).filter((n) => !searched.includes(n)))
+    // The four references that used to be matched to unrelated records are all web sources now.
+    for (const n of [4, 16, 30, 50]) assert.ok(web.includes(n), `[${n}] is a web source`)
+  }],
+  ["scholarly links and details keep a reference out of the web group", () => {
+    assert.equal(isWebSource("A. Author, “Some study,” IEEE Access, vol. 8, pp. 1–9, 2020. Available: https://ieeexplore.ieee.org/document/1"), false)
+    assert.equal(isWebSource("A. Author, “Some study,” Journal of Things, vol. 8, 2020. Available: https://example.org/paper.pdf"), false)
+    assert.equal(isWebSource("Author, A. (2021). Some study. https://arxiv.org/abs/2101.00001"), false)
+    assert.equal(isWebSource("“Docker image pull,” Docker Documentation, Accessed: May 18, 2026. [Online]. Available: https://docs.docker.com/x"), true)
+  }],
+  ["web sources are not searched; uncertain matches come back as possible matches", async () => {
+    const WEB = '[4] "Cloudflare Tunnel," Cloudflare Docs, Accessed: Apr. 27, 2026. [Online]. Available: https://developers.cloudflare.com/x.'
+    const NEAR = '[9] A. Writer, "Federated learning for wearable sensors in elderly care," in Proc. of Something.'
+    const s = stub({ search: () => [raw({ id: "W-near", display_name: "Federated learning for wearable sensors in elderly care", publication_year: null })] })
+    const r = await lookupReferences([WEB, NEAR], s.fn)
+    assert.equal(s.urls.filter((u) => u.includes("search=")).length, 1, "only the scholarly reference is searched")
+    assert.deepEqual(r.unmatched.map((u) => u.reason), ["web_source", "possible_match"])
+    assert.deepEqual(r.unmatched[0].web, { title: "Cloudflare Tunnel", url: "https://developers.cloudflare.com/x", site: "developers.cloudflare.com", year: null, accessed: 2026 })
+    assert.equal(r.works.length, 0)
+    assert.equal(r.unmatched[1].candidate?.id, "W-near")
+    assert.equal(r.unmatched[1].candidate?._sourcecheck.max_author_h_index, null)
+    assert.ok(r.unmatched[1].candidate?._sourcecheck.author_details, "possible matches get author details too")
   }],
   ["among equal title matches the published version whose venue is in the reference wins", () => {
     const title = "Language Models are Few-Shot Learners"
@@ -78,9 +148,10 @@ const tests: [string, () => Promise<void> | void][] = [
     })
     const r = await lookupReferences([APA_DOI, APA, FAKE], s.fn)
     assert.deepEqual(r.works.map((w) => w.id), ["W-gpt3", "W-johnny"])
+    assert.deepEqual(r.works.map((w) => w._sourcecheck.input_index), [0, 1], "input position kept for Input order")
     assert.equal(r.works[0]._sourcecheck.match?.method, "doi")
     assert.equal(r.works[1]._sourcecheck.match?.method, "title_search")
-    assert.deepEqual(r.unmatched, [{ reference: FAKE, reason: "no_confident_match" }])
+    assert.deepEqual(r.unmatched, [{ reference: FAKE, index: 2, reason: "no_confident_match" }])
     assert.equal(r.works[1]._sourcecheck.max_author_h_index, 12)
     assert.equal(r.works[1]._sourcecheck.author_details?.[0].institution, "UC Berkeley")
     assert.equal(r.works[1]._sourcecheck.abstract, "Hello world")
@@ -116,7 +187,7 @@ const tests: [string, () => Promise<void> | void][] = [
     const res = await handleLookup(post({ references: [FAKE] }), { fetcher: s.fn, rateLimit: allow })
     const body = await res.json()
     assert.equal(res.status, 200)
-    assert.deepEqual(body.unmatched, [{ reference: FAKE, reason: "not_found" }])
+    assert.deepEqual(body.unmatched, [{ reference: FAKE, index: 0, reason: "not_found" }])
   }],
   ["handler: more than 60 references → 400, nothing fetched", async () => {
     const s = stub({})
